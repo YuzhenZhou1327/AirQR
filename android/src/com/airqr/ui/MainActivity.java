@@ -24,13 +24,16 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
- * AirQR receiver, v1.3 UI state machine:
+ * AirQR receiver, v1.4 UI state machine:
  *   WELCOME (start button) → SCANNING (preview + progress) → DONE (save/again).
- * Camera only opens after the user presses 开始传输.
+ * Camera only opens after the user presses 开始传输, AND only after the
+ * SurfaceView actually has a surface (v1.3 bug: setPreviewDisplay raced the
+ * GONE→VISIBLE transition, camera silently failed to start).
  * Test QR: a BLOCK frame with tid=0xFFFFFFFF & id=0xFFFFFFFF (wire-valid but
  * impossible in a real session since id < cycle ≤ 8192) shows "test received".
  */
-public class MainActivity extends Activity implements FountainSession.Listener {
+public class MainActivity extends Activity implements FountainSession.Listener,
+        android.view.SurfaceHolder.Callback {
 
     private CameraController camera;
     private QrGridAnalyzer analyzer;
@@ -43,6 +46,8 @@ public class MainActivity extends Activity implements FountainSession.Listener {
     private String doneName = "airqr.bin";
     private boolean completed = false;
     private boolean cameraRequested = false;
+    private boolean surfaceReady = false;
+    private boolean scanning = false; // user pressed start; camera should run
     private long lastTestToast = 0;
 
     private static final int REQ_PERMS = 1;
@@ -70,6 +75,26 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         session = new FountainSession(this);
         analyzer = new QrGridAnalyzer();
         statusText.setText(R.string.scanning);
+        preview.getHolder().addCallback(this);
+    }
+
+    // ---- SurfaceHolder.Callback: camera waits for a real surface ----
+
+    @Override
+    public void surfaceCreated(android.view.SurfaceHolder holder) {
+        surfaceReady = true;
+        if (scanning && camera == null) startCamera();
+    }
+
+    @Override
+    public void surfaceChanged(android.view.SurfaceHolder holder, int format, int width, int height) {
+        // preview size handled inside CameraController; nothing to do
+    }
+
+    @Override
+    public void surfaceDestroyed(android.view.SurfaceHolder holder) {
+        surfaceReady = false;
+        stopCamera();
     }
 
     private void beginTransfer() {
@@ -96,11 +121,12 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         startPanel.setVisibility(View.GONE);
         scanPanel.setVisibility(View.VISIBLE);
         preview.setVisibility(View.VISIBLE);
-        startCamera();
+        scanning = true;
+        if (surfaceReady) startCamera(); // else: surfaceCreated will fire
     }
 
     private void startCamera() {
-        if (camera != null) return; // already running
+        if (camera != null || !surfaceReady) return; // wait for surface
         camera = new CameraController(preview, (nv21, w, h) -> {
             if (completed) return;
             analyzer.analyze(nv21, w, h, payload -> {
@@ -139,9 +165,7 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         });
     }
 
-    @Override
-    protected void onPause() {
-        super.onPause();
+    private void stopCamera() {
         if (camera != null) {
             camera.stop();
             camera = null;
@@ -149,15 +173,17 @@ public class MainActivity extends Activity implements FountainSession.Listener {
     }
 
     @Override
+    protected void onPause() {
+        super.onPause();
+        stopCamera(); // surface is also destroyed → surfaceDestroyed handles state
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         // Only resume scanning when the user is past the welcome screen.
-        if (session != null && !completed
-                && startPanel.getVisibility() != View.VISIBLE
-                && checkSelfPermission(Manifest.permission.CAMERA)
-                        == PackageManager.PERMISSION_GRANTED) {
-            startCamera();
-        }
+        // Camera start is driven by surfaceCreated (surface re-arrives after
+        // onResume in the Activity lifecycle, so nothing to do here).
     }
 
     // ---- FountainSession.Listener ----
@@ -237,7 +263,8 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         statusText.setText(R.string.scanning);
         fileText.setText("");
         progress.setProgress(0);
-        startCamera();
+        if (surfaceReady && camera == null) startCamera();
+        // if surface not ready, surfaceCreated will restart the camera
     }
 
     private static String human(long n) {
