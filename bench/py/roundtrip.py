@@ -142,13 +142,15 @@ def reassemble(bytid: dict, manifest: dict) -> bytes:
             peel_slot(sid)
         else:
             _, sel = selections(seed, k)
-            data = bytearray(blen)
+            # accumulator STARTS at the wire payload (eq: payload = XOR(selected))
+            data = bytearray(payload)
             for i, on in enumerate(sel):
                 if on and known[i] is not None:
                     data = bytearray(a ^ b for a, b in zip(data, known[i]))
                     sel[i] = False
             unk = [i for i, on in enumerate(sel) if on]
             if len(unk) == 0:
+                # fully known: content must equal payload (defensive no-op)
                 continue
             eq = [sel, bytes(data)]
             if len(unk) == 1:

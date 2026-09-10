@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple launcher icon: black square with white Q dot pattern suggestion -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path android:fillColor="#000000" android:pathData="M0,0h48v48h-48z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M6,6h8v8h-8zM18,6h8v8h-8zM30,6h8v8h-8zM6,18h8v8h-8zM30,18h8v8h-8zM6,30h8v8h-8zM18,30h8v8h-8zM30,30h4v4h-4zM36,30h2v6h-2zM30,36h4v4h-4zM36,36h2v6h-2zM30,42h8v2h-8z"/>
+</vector>

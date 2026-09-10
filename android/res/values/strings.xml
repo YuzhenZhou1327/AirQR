@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AirQR</string>
+    <string name="scanning">把电脑屏幕装进取景框…</string>
+    <string name="need_camera">需要相机权限才能接收</string>
+    <string name="done">接收完成，已校验</string>
+    <string name="progress_fmt">接收中 %1$d / %2$d 块</string>
+    <string name="done_fmt">%1$s（%2$s）已就绪\nSHA-256: %3$s…</string>
+    <string name="saved_to">已保存：%1$s（Downloads/AirQR）</string>
+    <string name="save_failed">保存失败：%1$s</string>
+    <string name="save">保存文件</string>
+    <string name="again">继续接收下一个</string>
+</resources>

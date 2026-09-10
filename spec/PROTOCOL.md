@@ -115,7 +115,10 @@ L   payload             见下
 
 ## 5. 调度（发送端）
 
-- `cycle = max(32, ceil(1.25 × K))`，块号空间 `[0, cycle)`（id ≥ K 的为冗余块）。
+- `cycle = max(32, ceil(1.75 × K))`，块号空间 `[0, cycle)`（id ≥ K 的为冗余块）。
+  设计依据（M1 周期研究，5 seeds × K∈{64,256,1024,3616} × 丢码 10–30%）：
+  1.75×K 全工况 100% 可解且接收开销 1.11–1.54×K；1.25× 在 30% 丢码时部分工况不可解，
+  2.0× 相比 1.75× 无显著收益。
 - PRNG：splitmix64，初始 `st = seed ⊕ 0x5EED5EED`；每 pass 前 reseed：
   `st = splitmix64_state(seed ⊕ 0x5EED5EED ⊕ (pass << 32))`。
 - 每 pass 生成 `order = shuffle([0, cycle))`：Fisher–Yates，

@@ -55,11 +55,14 @@ func TestNumSourceBlocks(t *testing.T) {
 }
 
 func TestCycleLen(t *testing.T) {
-	if CycleLen(1) != 32 || CycleLen(24) != 32 || CycleLen(25) != 32 {
-		t.Errorf("min cycle rule broken: %d %d %d", CycleLen(1), CycleLen(24), CycleLen(25))
+	if CycleLen(1) != 32 || CycleLen(18) != 32 {
+		t.Errorf("min cycle rule broken: %d %d", CycleLen(1), CycleLen(18))
 	}
-	if got := CycleLen(3641); got != 4552 {
-		t.Errorf("CycleLen(3641)=%d want 4552", got)
+	if got := CycleLen(3616); got != 6328 {
+		t.Errorf("CycleLen(3616)=%d want 6328 (1.75x)", got)
+	}
+	if got := CycleLen(18); got != 32 {
+		t.Errorf("CycleLen(18)=%d want 32 (min rule)", got)
 	}
 }
 
