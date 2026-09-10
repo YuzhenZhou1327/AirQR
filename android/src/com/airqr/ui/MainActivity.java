@@ -6,7 +6,6 @@ import android.content.ContentValues;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Environment;
 import android.provider.MediaStore;
 import android.view.SurfaceView;
 import android.view.View;
@@ -21,14 +20,15 @@ import com.airqr.core.FountainSession;
 import com.airqr.core.Wire;
 import com.airqr.R;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
- * AirQR receiver: fullscreen preview, blocks fed into FountainSession.
- * Completion writes via SAF (Downloads/AirQR) and beeps/vibrates.
+ * AirQR receiver, v1.3 UI state machine:
+ *   WELCOME (start button) → SCANNING (preview + progress) → DONE (save/again).
+ * Camera only opens after the user presses 开始传输.
+ * Test QR: a BLOCK frame with tid=0xFFFFFFFF & id=0xFFFFFFFF (wire-valid but
+ * impossible in a real session since id < cycle ≤ 8192) shows "test received".
  */
 public class MainActivity extends Activity implements FountainSession.Listener {
 
@@ -36,49 +36,79 @@ public class MainActivity extends Activity implements FountainSession.Listener {
     private QrGridAnalyzer analyzer;
     private FountainSession session;
     private SurfaceView preview;
-    private TextView statusText;
-    private TextView fileText;
+    private View startPanel, scanPanel, donePanel;
+    private TextView statusText, fileText, doneText;
     private ProgressBar progress;
-    private View donePanel;
-    private TextView doneText;
     private byte[] doneFile;
     private String doneName = "airqr.bin";
     private boolean completed = false;
+    private boolean cameraRequested = false;
+    private long lastTestToast = 0;
 
     private static final int REQ_PERMS = 1;
+    private static final long TEST_TID = 0xFFFFFFFFL;
+    private static final long TEST_ID = 0xFFFFFFFFL;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         preview = findViewById(R.id.preview);
+        startPanel = findViewById(R.id.start_panel);
+        scanPanel = findViewById(R.id.scan_panel);
         statusText = findViewById(R.id.status);
         fileText = findViewById(R.id.fileinfo);
         progress = findViewById(R.id.progress);
         donePanel = findViewById(R.id.done_panel);
         doneText = findViewById(R.id.done_text);
+        Button startBtn = findViewById(R.id.start_btn);
         Button saveBtn = findViewById(R.id.save_btn);
         Button againBtn = findViewById(R.id.again_btn);
+        startBtn.setOnClickListener(v -> beginTransfer());
         saveBtn.setOnClickListener(v -> saveCompleted());
         againBtn.setOnClickListener(v -> resetSession());
         session = new FountainSession(this);
         analyzer = new QrGridAnalyzer();
-        requestPermissions(new String[]{Manifest.permission.CAMERA}, REQ_PERMS);
+        statusText.setText(R.string.scanning);
+    }
+
+    private void beginTransfer() {
+        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            enterScanning();
+        } else if (!cameraRequested) {
+            cameraRequested = true;
+            requestPermissions(new String[]{Manifest.permission.CAMERA}, REQ_PERMS);
+        }
     }
 
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         if (code == REQ_PERMS) {
-            boolean ok = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
-            if (ok) startCamera();
-            else statusText.setText(R.string.need_camera);
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+                enterScanning();
+            } else {
+                Toast.makeText(this, R.string.need_camera, Toast.LENGTH_LONG).show();
+            }
         }
     }
 
+    private void enterScanning() {
+        startPanel.setVisibility(View.GONE);
+        scanPanel.setVisibility(View.VISIBLE);
+        preview.setVisibility(View.VISIBLE);
+        startCamera();
+    }
+
     private void startCamera() {
+        if (camera != null) return; // already running
         camera = new CameraController(preview, (nv21, w, h) -> {
             if (completed) return;
             analyzer.analyze(nv21, w, h, payload -> {
+                if (payload.length > 1 && payload[0] == Wire.MAGIC
+                        && u32le(payload, 2) == TEST_TID && u32le(payload, 10) == TEST_ID) {
+                    onTestQr();
+                    return;
+                }
                 if (payload.length > 0 && payload[0] == '{') {
                     session.onManifest(payload);
                 } else if (payload.length > 1 && payload[0] == Wire.MAGIC) {
@@ -93,6 +123,22 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         }
     }
 
+    private static long u32le(byte[] b, int off) {
+        return (b[off] & 0xFFL) | ((b[off + 1] & 0xFFL) << 8)
+                | ((b[off + 2] & 0xFFL) << 16) | ((b[off + 3] & 0xFFL) << 24);
+    }
+
+    private void onTestQr() {
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (now - lastTestToast < 3000) return; // throttle
+        lastTestToast = now;
+        runOnUiThread(() -> {
+            statusText.setText(R.string.test_ok);
+            beep();
+            Toast.makeText(this, R.string.test_ok, Toast.LENGTH_SHORT).show();
+        });
+    }
+
     @Override
     protected void onPause() {
         super.onPause();
@@ -105,8 +151,11 @@ public class MainActivity extends Activity implements FountainSession.Listener {
     @Override
     protected void onResume() {
         super.onResume();
-        if (session != null && !completed && checkSelfPermission(Manifest.permission.CAMERA)
-                == PackageManager.PERMISSION_GRANTED && camera == null) {
+        // Only resume scanning when the user is past the welcome screen.
+        if (session != null && !completed
+                && startPanel.getVisibility() != View.VISIBLE
+                && checkSelfPermission(Manifest.permission.CAMERA)
+                        == PackageManager.PERMISSION_GRANTED) {
             startCamera();
         }
     }
@@ -136,8 +185,10 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         doneFile = file;
         doneName = info.name;
         runOnUiThread(() -> {
-            camera.stop();
-            camera = null;
+            if (camera != null) {
+                camera.stop();
+                camera = null;
+            }
             progress.setProgress(progress.getMax());
             statusText.setText(R.string.done);
             donePanel.setVisibility(View.VISIBLE);

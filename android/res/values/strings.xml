@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AirQR</string>
+    <string name="welcome_hint">电脑端运行 airqr send 后，把手机对准屏幕即可接收。\n建议先扫描测试二维码验证摄像头链路。</string>
+    <string name="start_transfer">开始传输</string>
     <string name="scanning">把电脑屏幕装进取景框…</string>
     <string name="need_camera">需要相机权限才能接收</string>
     <string name="done">接收完成，已校验</string>
@@ -10,4 +12,6 @@
     <string name="save_failed">保存失败：%1$s</string>
     <string name="save">保存文件</string>
     <string name="again">继续接收下一个</string>
+    <string name="test_ok">✓ 测试二维码接收成功（相机与解码链路正常）</string>
+    <string name="waiting_manifest">已识别二维码，等待会话信息…</string>
 </resources>

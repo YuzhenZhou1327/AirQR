@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +27,7 @@ const usage = `airqr — air-gapped QR file transfer (sender side)
 Usage:
   airqr render <file> [flags]     render PNG frames for bench/offline playback
   airqr send   <file> [flags]     fullscreen player (M2)
+  airqr testqr [out.png]          write the camera self-test QR (scan on phone)
 
 render flags:
   --out DIR       output directory (default frames)
@@ -61,6 +63,8 @@ func main() {
 		renderCmd(os.Args[2:])
 	case "send":
 		sendCmd(os.Args[2:])
+	case "testqr":
+		testqrCmd(os.Args[2:])
 	default:
 		die("unknown command %q\n%s", os.Args[1], usage)
 	}
@@ -218,6 +222,39 @@ func renderFrames(path, out string, grid, version int, ecc string, width, height
 	}, "\n")), 0o644)
 	fmt.Printf("rendered %d frames (%d passes, K=%d, cycle=%d, blen=%d, seed=%d, tid=%d) -> %s\n",
 		total, passes, k, sess.Cycle(), blen, seed, tid, out)
+}
+
+// testqrCmd writes a single QR that the receiver recognizes as the camera
+// self-test: BLOCK with tid=0xFFFFFFFF, id=0xFFFFFFFF (wire-valid, impossible
+// in a real session since block ids are < cycle ≤ 8192). Content is human
+// text so it also decodes as a plain QR anywhere.
+func testqrCmd(args []string) {
+	out := "airqr-testqr.png"
+	if len(args) == 1 && !strings.HasPrefix(args[0], "-") {
+		out = args[0]
+	}
+	// 18B header + payload: magic,version,tid=0xFFFFFFFF,blen=16,id=0xFFFFFFFF,crc
+	data := []byte("AirQR camera self-test OK")
+	full := make([]byte, 0, 18+len(data))
+	full = append(full, wire.Magic, wire.Version)
+	for _, v := range []uint32{0xFFFFFFFF, 16, 0xFFFFFFFF} {
+		full = append(full, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
+	}
+	crc := crc32.ChecksumIEEE(data)
+	full = append(full, byte(crc), byte(crc>>8), byte(crc>>16), byte(crc>>24))
+	full = append(full, data...)
+	q, err := qrcode.NewWithForcedVersion(string(full), 10, qrcode.Low)
+	if err != nil {
+		die("testqr: %v", err)
+	}
+	png, err2 := q.PNG(512)
+	if err2 != nil {
+		die("qr png: %v", err2)
+	}
+	if err := os.WriteFile(out, png, 0o644); err != nil {
+		die("write %s: %v", out, err)
+	}
+	fmt.Printf("test QR written: %s (scan it on the phone to verify the camera chain)\n", out)
 }
 
 func renderCmd(args []string) {
