@@ -3,3 +3,8 @@ dist/
 frames/
 __pycache__/
 *.pyc
+build/
+temp/
+android/keystore.properties
+airqr.exe
+android/build/
