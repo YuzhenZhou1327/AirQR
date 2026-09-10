@@ -10,7 +10,7 @@ BT="$SDK/build-tools-35"
 AJAR="$SDK/android-34/android.jar"
 OUT="$PROJ/build"
 KEYSTORE="C:/Users/23653/Android/keystore/airqr.keystore"
-VERSION=1.0
+VERSION=1.1
 ZXING="$PROJ/libs/core-3.5.3.jar"
 
 if [ -f "$PROJ/keystore.properties" ]; then
@@ -43,10 +43,10 @@ echo "==> [3/7] javac (src + zxing jar + generated R)"
   $(find "$PROJ/src" -name '*.java') \
   "$OUT/gen/com/airqr/R.java" 2>&1 | grep -v "bootstrap class path" || true
 
-echo "==> [4/7] d8 dex (build-tools 35)"
+echo "==> [4/7] d8 dex (build-tools 35; app classes + zxing jar — deps must be dexed too)"
 find "$OUT/classes" -name '*.class' > "$OUT/classlist.txt"
 "$BT/d8.bat" --release --lib "$AJAR" --min-api 29 \
-  --output "$OUT" $(cat "$OUT/classlist.txt")
+  --output "$OUT" $(cat "$OUT/classlist.txt") "$ZXING"
 ls -la "$OUT/classes.dex"
 
 echo "==> [5/7] insert classes.dex"
