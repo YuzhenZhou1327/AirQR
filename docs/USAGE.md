@@ -6,8 +6,11 @@
 
 | 产物 | 用途 | 校验 |
 |---|---|---|
-| `airqr-linux-amd64` | Linux 发送端单文件 | `sha256sum` |
+| `airqr-linux-amd64` | Linux 发送端（x86-64：普通 PC/工作站/服务器） | `sha256sum` |
+| `airqr-linux-arm64` | Linux 发送端（ARM64：树莓派 4/5、Apple Silicon 虚拟机、国产 ARM 主机、飞腾/鲲鹏等） | `sha256sum` |
 | `airqr-v1.0.apk` | 安卓接收端 | `sha256sum` |
+
+不确定 CPU 架构时在目标机执行 `uname -m`：`x86_64` 用 amd64 版，`aarch64` 用 arm64 版。
 
 安装包本身过气隙的方式由你选择（纸 QR / 物理介质 / 现有跨网闸流程）；AirQR 只负责文件传输。
 
