@@ -10,7 +10,7 @@ BT="$SDK/build-tools-35"
 AJAR="$SDK/android-34/android.jar"
 OUT="$PROJ/build"
 KEYSTORE="C:/Users/23653/Android/keystore/airqr.keystore"
-VERSION=1.1
+VERSION=1.2
 ZXING="$PROJ/libs/core-3.5.3.jar"
 
 if [ -f "$PROJ/keystore.properties" ]; then
@@ -19,7 +19,7 @@ else
   echo "缺少 $PROJ/keystore.properties（内容一行：KS_PASS=你的口令）"; exit 1
 fi
 
-rm -rf "$OUT"
+rm -rf "$OUT/gen" "$OUT/classes" "$OUT/res.zip" "$OUT/base.apk" "$OUT/classes.dex" "$OUT/aligned.apk" "$OUT/classlist.txt"
 mkdir -p "$OUT/gen" "$OUT/classes"
 
 echo "==> [1/7] aapt2 compile resources"
