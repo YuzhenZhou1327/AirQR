@@ -1,0 +1,9 @@
+tid=12345
+seed=55512345
+size=204800
+blen=2900
+k=71
+sha256=see-bench
+frames=46
+grid=4
+version=40
