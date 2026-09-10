@@ -2,49 +2,67 @@ package com.airqr.camera;
 
 import android.graphics.Bitmap;
 import android.os.Handler;
-import android.os.Looper;
+import android.os.HandlerThread;
 
 /**
- * Mock camera for self-test: converts a Bitmap (the test QR image or a
- * rendered frame) into NV21 frames and feeds the SAME analyzer path as the
- * real camera. Decouples "camera hardware" from "decode pipeline":
- *   self-test passes  → pipeline OK, suspect camera/focus hardware
- *   self-test fails   → bug inside the APK (and logcat shows the stage)
+ * Mock camera for self-test: converts a Bitmap (the test QR image) into NV21
+ * frames on a BACKGROUND thread and feeds the SAME analyzer path as the real
+ * camera. v1.6 bug: ticks ran on the main looper — each analyze() (3-stage
+ * multi-barcode decode) took longer than the 200ms tick, so the UI froze.
+ * Now: dedicated HandlerThread + analyzer busy-skip + scaled-down bitmap.
  */
 public final class MockCamera {
     public interface FrameCallback {
         void onFrame(byte[] nv21, int width, int height);
     }
 
-    private final Handler handler = new Handler(Looper.getMainLooper());
     private final Bitmap bitmap;
     private final FrameCallback callback;
-    private boolean running;
-    private int ticks;
+    private final HandlerThread thread;
+    private final Handler handler;
+    private volatile boolean running;
+    private volatile boolean busy; // previous frame still decoding → skip
 
     public MockCamera(Bitmap bitmap, FrameCallback callback) {
-        this.bitmap = bitmap;
+        // decode cost ~ O(pixels): cap the mock image to 480px wide
+        int maxW = 480;
+        this.bitmap = (bitmap.getWidth() > maxW)
+                ? Bitmap.createScaledBitmap(bitmap, maxW,
+                    Math.round((float) bitmap.getHeight() * maxW / bitmap.getWidth()), true)
+                : bitmap;
         this.callback = callback;
+        thread = new HandlerThread("airqr-mock");
+        thread.start();
+        handler = new Handler(thread.getLooper());
     }
 
-    /** Starts emitting the bitmap as NV21 frames at ~5 fps. */
     public void start() {
         running = true;
-        handler.postDelayed(this::tick, 100);
+        handler.post(this::tick);
     }
 
     public void stop() {
         running = false;
-        handler.removeCallbacksAndMessages(null);
+        if (thread != null && thread.isAlive()) {
+            thread.quitSafely();
+        }
     }
 
     private void tick() {
         if (!running) return;
-        ticks++;
-        int w = bitmap.getWidth(), h = bitmap.getHeight();
-        byte[] nv21 = bitmapToNV21(bitmap);
-        callback.onFrame(nv21, w, h);
-        handler.postDelayed(this::tick, 200); // ~5 fps
+        if (busy) {
+            handler.postDelayed(this::tick, 100);
+            return;
+        }
+        busy = true;
+        try {
+            int w = bitmap.getWidth(), h = bitmap.getHeight();
+            byte[] nv21 = bitmapToNV21(bitmap);
+            callback.onFrame(nv21, w, h);
+        } finally {
+            busy = false;
+        }
+        handler.postDelayed(this::tick, 300); // ~3 fps, off the UI thread
     }
 
     /** ARGB bitmap → NV21 (BT.601 full-range, standard camera conversion). */
@@ -63,8 +81,8 @@ public final class MockCamera {
                 if ((y & 1) == 0 && (x & 1) == 0) {
                     int u = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
                     int v = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
-                    out[uvIdx++] = (byte) (v > 255 ? 255 : (v < 0 ? 0 : v)); // V first
-                    out[uvIdx++] = (byte) (u > 255 ? 255 : (u < 0 ? 0 : u)); // then U
+                    out[uvIdx++] = (byte) (v > 255 ? 255 : (v < 0 ? 0 : v));
+                    out[uvIdx++] = (byte) (u > 255 ? 255 : (u < 0 ? 0 : u));
                 }
             }
         }

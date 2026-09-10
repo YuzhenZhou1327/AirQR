@@ -10,7 +10,7 @@ BT="$SDK/build-tools-35"
 AJAR="$SDK/android-34/android.jar"
 OUT="$PROJ/build"
 KEYSTORE="C:/Users/23653/Android/keystore/airqr.keystore"
-VERSION=1.6
+VERSION=1.7
 ZXING="$PROJ/libs/core-3.5.3.jar"
 
 if [ -f "$PROJ/keystore.properties" ]; then

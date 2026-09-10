@@ -40,6 +40,20 @@ public final class QrGridAnalyzer {
     public volatile long framesAnalyzed = 0;
     public volatile long payloadCount = 0;
     public volatile String lastStage = "init";
+    private volatile boolean busy = false; // drop frames while decoding
+
+    /** True if this frame should be skipped (previous still decoding). */
+    public boolean shouldSkip() {
+        if (busy) {
+            return true;
+        }
+        busy = true;
+        return false;
+    }
+
+    public void release() {
+        busy = false;
+    }
 
     public QrGridAnalyzer() {
         hints.put(DecodeHintType.TRY_HARDER, Boolean.TRUE);
@@ -71,6 +85,23 @@ public final class QrGridAnalyzer {
                 ? src.rotateCounterClockwise() : src;
 
         framesAnalyzed++;
+        int total = 0;
+        try {
+            total = decodeStages(rot, sink);
+        } finally {
+            busy = false;
+        }
+        payloadCount += total;
+        if (total == 0) {
+            logThrottled("no codes; rotSize=" + rot.getWidth() + "x" + rot.getHeight()
+                    + " luma[min=" + lumaMin(rot) + " max=" + lumaMax(rot) + "]");
+        } else {
+            logThrottled("decoded " + total + " payload(s)");
+        }
+        return total;
+    }
+
+    private int decodeStages(com.google.zxing.LuminanceSource rot, Sink sink) {
         int total = 0;
         // Stage 1: whole frame, global histogram binarizer
         lastStage = "full-global";

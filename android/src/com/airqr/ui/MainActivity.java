@@ -151,7 +151,7 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         if (mockCamera != null) return; // self-test owns the analyzer
         diagHandler.postDelayed(diagTick, 3000); // on-screen decode diagnostics
         camera = new CameraController(preview, (nv21, w, h) -> {
-            if (completed) return;
+            if (completed || analyzer.shouldSkip()) return;
             analyzer.analyze(nv21, w, h, makeSink());
         });
         try {
@@ -170,17 +170,22 @@ public class MainActivity extends Activity implements FountainSession.Listener {
     private void runSelfTest() {
         try {
             stopCamera();
-            mockCamera = new MockCamera(loadTestBitmap(), (nv21, w, h) -> {
-                runOnUiThread(() -> statusText.setText(R.string.selftest_running));
+            android.graphics.Bitmap bmp = loadTestBitmap();
+            android.widget.ImageView iv = findViewById(R.id.selftest_image);
+            iv.setImageBitmap(bmp);
+            iv.setVisibility(View.VISIBLE);
+            mockCamera = new MockCamera(bmp, (nv21, w, h) -> {
+                if (analyzer.shouldSkip()) return;
                 analyzer.analyze(nv21, w, h, makeSink());
             });
             statusText.setText(R.string.selftest_running);
             mockCamera.start();
+            final long startFrames = analyzer.payloadCount;
             diagHandler.postDelayed(() -> {
-                if (mockCamera != null && analyzer.payloadCount == 0) {
+                if (mockCamera != null && analyzer.payloadCount == startFrames) {
                     statusText.setText(R.string.selftest_fail);
                 }
-            }, 4000);
+            }, 5000);
         } catch (Exception e) {
             android.util.Log.e("AirQR", "selftest setup", e);
             statusText.setText(getString(R.string.save_failed, e.toString()));
@@ -197,7 +202,7 @@ public class MainActivity extends Activity implements FountainSession.Listener {
 
     private final Runnable diagTick = new Runnable() {
         @Override public void run() {
-            if (!completed && camera != null) {
+            if (!completed && camera != null && mockCamera == null) {
                 long fa = analyzer.framesAnalyzed;
                 long pc = analyzer.payloadCount;
                 if (fa > 0 && pc == 0 && session.info() == null) {
@@ -224,6 +229,7 @@ public class MainActivity extends Activity implements FountainSession.Listener {
             if (mockCamera != null) { // self-test passed → restart real camera
                 mockCamera.stop();
                 mockCamera = null;
+                findViewById(R.id.selftest_image).setVisibility(View.GONE);
                 if (surfaceReady) startCamera();
             }
         });
