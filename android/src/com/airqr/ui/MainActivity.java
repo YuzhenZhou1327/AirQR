@@ -85,6 +85,11 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         session = new FountainSession(this);
         analyzer = new QrGridAnalyzer();
         statusText.setText(R.string.scanning);
+        // adb-driven diagnostic: am start ... --ez selftest true (auto self-test)
+        if (getIntent() != null && getIntent().getBooleanExtra("selftest", false)) {
+            android.util.Log.i("AirQR", "auto self-test requested via intent");
+            startPanel.postDelayed(this::autoSelfTest, 500);
+        }
         preview.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture st, int w, int h) {
                 surfaceReady = true;
@@ -167,6 +172,17 @@ public class MainActivity extends Activity implements FountainSession.Listener {
      * fails, the bug is in the APK (logcat AirQR); if it passes, the decode
      * pipeline is fine and real-camera issues are hardware/focus.
      */
+    /** adb path: welcome → (simulate start) → self-test without any taps. */
+    private void autoSelfTest() {
+        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            enterScanning();
+            // scan panel is now visible; run the self-test directly
+            runSelfTest();
+        } else {
+            android.util.Log.e("AirQR", "auto self-test: camera permission not granted");
+        }
+    }
+
     private void runSelfTest() {
         try {
             stopCamera();
@@ -179,11 +195,17 @@ public class MainActivity extends Activity implements FountainSession.Listener {
                 analyzer.analyze(nv21, w, h, makeSink());
             });
             statusText.setText(R.string.selftest_running);
+            android.util.Log.i("AirQR", "self-test started: bitmap "
+                    + bmp.getWidth() + "x" + bmp.getHeight());
             mockCamera.start();
             final long startFrames = analyzer.payloadCount;
             diagHandler.postDelayed(() -> {
+                android.util.Log.i("AirQR", "self-test 5s check: frames=" + analyzer.framesAnalyzed
+                        + " payloads=" + analyzer.payloadCount + " (start=" + startFrames + ")");
                 if (mockCamera != null && analyzer.payloadCount == startFrames) {
                     statusText.setText(R.string.selftest_fail);
+                    android.util.Log.e("AirQR", "SELF-TEST FAILED: no payload decoded in 5s; "
+                            + "stage=" + analyzer.lastStage + " frames=" + analyzer.framesAnalyzed);
                 }
             }, 5000);
         } catch (Exception e) {

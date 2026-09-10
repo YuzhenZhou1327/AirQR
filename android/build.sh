@@ -10,7 +10,7 @@ BT="$SDK/build-tools-35"
 AJAR="$SDK/android-34/android.jar"
 OUT="$PROJ/build"
 KEYSTORE="C:/Users/23653/Android/keystore/airqr.keystore"
-VERSION=1.7
+VERSION=1.9
 ZXING="$PROJ/libs/core-3.5.3.jar"
 
 if [ -f "$PROJ/keystore.properties" ]; then
@@ -37,18 +37,30 @@ echo "==> [2/7] aapt2 link"
   "$OUT/res.zip"
 
 echo "==> [3/7] javac (src + zxing jar + generated R)"
+# NOTE (v1.8 lesson): NEVER mask javac failures with '|| true' — a failed
+# compile shipped a dex without MainActivity (launch ClassNotFoundException).
+# pipefail keeps the grep filter but preserves javac's exit code.
+set -o pipefail
 "$SDK/../../jdk/jdk-25.0.4.1+1/bin/javac.exe" \
   -source 11 -target 11 -encoding UTF-8 \
   -classpath "$AJAR;$ZXING" \
   -d "$OUT/classes" \
   $(find "$PROJ/src" -name '*.java') \
-  "$OUT/gen/com/airqr/R.java" 2>&1 | grep -v "bootstrap class path" || true
+  "$OUT/gen/com/airqr/R.java" 2>&1 | grep -v "bootstrap class path"
+set +o pipefail
 
 echo "==> [4/7] d8 dex (build-tools 35; app classes + zxing jar — deps must be dexed too)"
 find "$OUT/classes" -name '*.class' > "$OUT/classlist.txt"
 "$BT/d8.bat" --release --lib "$AJAR" --min-api 29 \
   --output "$OUT" $(cat "$OUT/classlist.txt") "$ZXING"
 ls -la "$OUT/classes.dex"
+
+echo "==> [4.5/7] dex sanity: MainActivity + zxing must be inside (v1.8 lesson)"
+"$BT/dexdump.exe" -d "$OUT/classes.dex" 2>/dev/null | grep -q "Lcom/airqr/ui/MainActivity;" \
+  || { echo "FATAL: MainActivity missing from classes.dex — aborting"; exit 1; }
+"$BT/dexdump.exe" -d "$OUT/classes.dex" 2>/dev/null | grep -q "Lcom/google/zxing/MultiFormatReader;" \
+  || { echo "FATAL: zxing missing from classes.dex — aborting"; exit 1; }
+echo "  dex check OK"
 
 echo "==> [5/7] insert classes.dex"
 python - "$OUT/base.apk" "$OUT/classes.dex" <<'PYEOF'

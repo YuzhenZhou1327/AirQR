@@ -92,6 +92,7 @@ public final class QrGridAnalyzer {
             busy = false;
         }
         payloadCount += total;
+        // NOTE: counted once here in analyze(); decodeStages must NOT recount.
         if (total == 0) {
             logThrottled("no codes; rotSize=" + rot.getWidth() + "x" + rot.getHeight()
                     + " luma[min=" + lumaMin(rot) + " max=" + lumaMax(rot) + "]");
@@ -117,13 +118,6 @@ public final class QrGridAnalyzer {
         if (total == 0) {
             lastStage = "full-hybrid";
             total += scanAll(rot, true, sink, "full-hybrid");
-        }
-        payloadCount += total;
-        if (total == 0) {
-            logThrottled("no codes; rotSize=" + rot.getWidth() + "x" + rot.getHeight()
-                    + " luma[min=" + lumaMin(rot) + " max=" + lumaMax(rot) + "]");
-        } else {
-            logThrottled("decoded " + total + " payload(s)");
         }
         return total;
     }
@@ -152,10 +146,18 @@ public final class QrGridAnalyzer {
             Result[] results = multi.decodeMultiple(bmp, hints);
             if (results != null) {
                 for (Result r : results) {
-                    byte[] raw = r.getRawBytes();
-                    if (raw == null || raw.length == 0) {
-                        String text = r.getText();
-                        if (text != null) raw = text.getBytes(StandardCharsets.ISO_8859_1);
+                    // NOTE: for QR, getRawBytes() returns ALL data codewords
+                    // INCLUDING mode/length headers (e.g. 274B for a 43B payload),
+                    // so it must NOT be used as the payload. getText() with the
+                    // ISO-8859-1 CHARACTER_SET hint round-trips byte-mode content
+                    // losslessly (verified byte-identical vs zxing-cpp). Text first,
+                    // rawBytes only as fallback.
+                    byte[] raw = null;
+                    if (r.getText() != null) {
+                        raw = r.getText().getBytes(StandardCharsets.ISO_8859_1);
+                    }
+                    if ((raw == null || raw.length == 0)) {
+                        raw = r.getRawBytes();
                     }
                     if (raw != null && raw.length > 0) {
                         sink.onPayload(raw);

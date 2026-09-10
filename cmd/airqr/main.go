@@ -233,11 +233,14 @@ func testqrCmd(args []string) {
 	if len(args) == 1 && !strings.HasPrefix(args[0], "-") {
 		out = args[0]
 	}
-	// 18B header + payload: magic,version,tid=0xFFFFFFFF,blen=16,id=0xFFFFFFFF,crc
+	// 18B header + payload: magic,version,tid=0xFFFFFFFF,blen=len(data),id=0xFFFFFFFF,crc
+	// NOTE: blen must satisfy the wire rule data.length <= blen+4 (it IS the
+	// block length here since the test QR carries exactly one block).
 	data := []byte("AirQR camera self-test OK")
+	blen := uint32(len(data))
 	full := make([]byte, 0, 18+len(data))
 	full = append(full, wire.Magic, wire.Version)
-	for _, v := range []uint32{0xFFFFFFFF, 16, 0xFFFFFFFF} {
+	for _, v := range []uint32{0xFFFFFFFF, blen, 0xFFFFFFFF} {
 		full = append(full, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
 	}
 	crc := crc32.ChecksumIEEE(data)

@@ -42,8 +42,8 @@ public final class FountainSession {
         return info;
     }
 
-    /** Feeds one MANIFEST JSON payload. */
-    public void onManifest(byte[] json) {
+    /** Feeds one MANIFEST JSON payload. Thread-safe: camera and mock threads share this. */
+    public synchronized void onManifest(byte[] json) {
         try {
             Wire.Manifest m = Wire.parseManifest(json);
             if (info != null) {
@@ -70,8 +70,8 @@ public final class FountainSession {
         }
     }
 
-    /** Feeds one BLOCK payload (full QR bytes incl. 14B header). */
-    public void onBlock(byte[] payload) {
+    /** Feeds one BLOCK payload (full QR bytes incl. 18B header). Thread-safe. */
+    public synchronized void onBlock(byte[] payload) {
         try {
             Wire.Block b = Wire.parseBlock(payload);
             if (info == null) {
