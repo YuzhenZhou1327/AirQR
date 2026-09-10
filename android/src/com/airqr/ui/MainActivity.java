@@ -16,6 +16,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.airqr.camera.CameraController;
+import com.airqr.camera.MockCamera;
 import com.airqr.camera.QrGridAnalyzer;
 import com.airqr.core.FountainSession;
 import com.airqr.core.Wire;
@@ -53,6 +54,7 @@ public class MainActivity extends Activity implements FountainSession.Listener {
     private static final int REQ_PERMS = 1;
     private static final long TEST_TID = 0xFFFFFFFFL;
     private static final long TEST_ID = 0xFFFFFFFFL;
+    private MockCamera mockCamera; // non-null during self-test
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -75,9 +77,11 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         Button startBtn = findViewById(R.id.start_btn);
         Button saveBtn = findViewById(R.id.save_btn);
         Button againBtn = findViewById(R.id.again_btn);
+        Button selftestBtn = findViewById(R.id.selftest_btn);
         startBtn.setOnClickListener(v -> beginTransfer());
         saveBtn.setOnClickListener(v -> saveCompleted());
         againBtn.setOnClickListener(v -> resetSession());
+        selftestBtn.setOnClickListener(v -> runSelfTest());
         session = new FountainSession(this);
         analyzer = new QrGridAnalyzer();
         statusText.setText(R.string.scanning);
@@ -126,28 +130,68 @@ public class MainActivity extends Activity implements FountainSession.Listener {
 
     private final android.os.Handler diagHandler = new android.os.Handler();
 
+    /** One sink used by BOTH the real camera and the mock self-test feed. */
+    private QrGridAnalyzer.Sink makeSink() {
+        return payload -> {
+            if (payload.length > 1 && payload[0] == Wire.MAGIC
+                    && u32le(payload, 2) == TEST_TID && u32le(payload, 10) == TEST_ID) {
+                onTestQr();
+                return;
+            }
+            if (payload.length > 0 && payload[0] == '{') {
+                session.onManifest(payload);
+            } else if (payload.length > 1 && payload[0] == Wire.MAGIC) {
+                session.onBlock(payload);
+            }
+        };
+    }
+
     private void startCamera() {
         if (camera != null || !surfaceReady) return; // wait for surface
+        if (mockCamera != null) return; // self-test owns the analyzer
         diagHandler.postDelayed(diagTick, 3000); // on-screen decode diagnostics
         camera = new CameraController(preview, (nv21, w, h) -> {
             if (completed) return;
-            analyzer.analyze(nv21, w, h, payload -> {
-                if (payload.length > 1 && payload[0] == Wire.MAGIC
-                        && u32le(payload, 2) == TEST_TID && u32le(payload, 10) == TEST_ID) {
-                    onTestQr();
-                    return;
-                }
-                if (payload.length > 0 && payload[0] == '{') {
-                    session.onManifest(payload);
-                } else if (payload.length > 1 && payload[0] == Wire.MAGIC) {
-                    session.onBlock(payload);
-                }
-            });
+            analyzer.analyze(nv21, w, h, makeSink());
         });
         try {
             camera.start();
         } catch (SecurityException e) {
             statusText.setText(R.string.need_camera);
+        }
+    }
+
+    /**
+     * Self-test: shows the bundled test QR on the TextureView (simulating the
+     * PC screen) and feeds its pixels through the SAME analyzer path. If this
+     * fails, the bug is in the APK (logcat AirQR); if it passes, the decode
+     * pipeline is fine and real-camera issues are hardware/focus.
+     */
+    private void runSelfTest() {
+        try {
+            stopCamera();
+            mockCamera = new MockCamera(loadTestBitmap(), (nv21, w, h) -> {
+                runOnUiThread(() -> statusText.setText(R.string.selftest_running));
+                analyzer.analyze(nv21, w, h, makeSink());
+            });
+            statusText.setText(R.string.selftest_running);
+            mockCamera.start();
+            diagHandler.postDelayed(() -> {
+                if (mockCamera != null && analyzer.payloadCount == 0) {
+                    statusText.setText(R.string.selftest_fail);
+                }
+            }, 4000);
+        } catch (Exception e) {
+            android.util.Log.e("AirQR", "selftest setup", e);
+            statusText.setText(getString(R.string.save_failed, e.toString()));
+        }
+    }
+
+    private android.graphics.Bitmap loadTestBitmap() {
+        try (java.io.InputStream is = getAssets().open("testqr.png")) {
+            return android.graphics.BitmapFactory.decodeStream(is);
+        } catch (Exception e) {
+            throw new RuntimeException("testqr asset missing", e);
         }
     }
 
@@ -177,10 +221,19 @@ public class MainActivity extends Activity implements FountainSession.Listener {
             statusText.setText(R.string.test_ok);
             beep();
             Toast.makeText(this, R.string.test_ok, Toast.LENGTH_SHORT).show();
+            if (mockCamera != null) { // self-test passed → restart real camera
+                mockCamera.stop();
+                mockCamera = null;
+                if (surfaceReady) startCamera();
+            }
         });
     }
 
     private void stopCamera() {
+        if (mockCamera != null) {
+            mockCamera.stop();
+            mockCamera = null;
+        }
         if (camera != null) {
             camera.stop();
             camera = null;

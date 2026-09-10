@@ -10,7 +10,7 @@ BT="$SDK/build-tools-35"
 AJAR="$SDK/android-34/android.jar"
 OUT="$PROJ/build"
 KEYSTORE="C:/Users/23653/Android/keystore/airqr.keystore"
-VERSION=1.5
+VERSION=1.6
 ZXING="$PROJ/libs/core-3.5.3.jar"
 
 if [ -f "$PROJ/keystore.properties" ]; then
@@ -30,6 +30,7 @@ echo "==> [2/7] aapt2 link"
   -o "$OUT/base.apk" \
   -I "$AJAR" \
   --manifest "$PROJ/AndroidManifest.xml" \
+  -A "$PROJ/assets" \
   --java "$OUT/gen" \
   --min-sdk-version 29 --target-sdk-version 34 \
   --auto-add-overlay \

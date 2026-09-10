@@ -12,7 +12,10 @@
     <string name="save_failed">保存失败：%1$s</string>
     <string name="save">保存文件</string>
     <string name="again">继续接收下一个</string>
+    <string name="selftest_running">自检运行中…</string>
+    <string name="selftest_fail">自检失败：解码管线有 bug（logcat AirQR 有详情）</string>
     <string name="test_ok">✓ 测试二维码接收成功（相机与解码链路正常）</string>
     <string name="diag_fmt">已分析 %1$d 帧，未识别到二维码（阶段：%2$s）。请靠近/对正屏幕，或点击屏幕对焦</string>
+    <string name="selftest">自检（模拟屏幕测试码）</string>
     <string name="waiting_manifest">已识别二维码，等待会话信息…</string>
 </resources>
