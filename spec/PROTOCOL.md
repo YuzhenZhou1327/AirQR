@@ -21,7 +21,9 @@
 | 10 | 4 | block_id | uint32 LE；`id < K` 为源块，`≥ K` 为 LT 冗余块 |
 | 14 | B | block_data | LT 块本体（§4 格式） |
 
-- 头共 14 字节，全部小端。QR payload 总长 `14 + block_len`。
+- 头共 14 字节，全部小端。QR payload 总长 `14 + block_data`。
+- `block_data` 校验规则：`1 ≤ len(block_data) ≤ 4 + block_len`
+  （源块 = 4B seed + min(blen, 剩余)；LT 块 = 4B seed + blen）。
 - QR 版本/ECC 由 preset 决定。推荐 v40-L：binary 容量 2953B → `block_len ≤ 2939`，默认 2900。
 - LT 约束：`K ≤ 8192`（K = ceil(size/block_len)；10MB/2900B ≈ 3641 ✓，文件上限 ≈ 23.7MB）。
 - LT 约束：槽位种子 `seed < 2^26`；degree ∈ 4..64 由 seed 派生（§4.1），不上线路。

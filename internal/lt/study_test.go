@@ -48,6 +48,10 @@ func (r rsdCand) selFn(seed uint32, k int) (int, []bool) { return selectionsRSD(
 
 // runSession watches passes (max 4) with a fixed per-slot loss, returns fed/K.
 func runSession(t *testing.T, k, blen int, sessionSeed uint32, loss int, fn func(uint32, int) (int, []bool)) (float64, bool) {
+	return runSessionCycle(t, k, blen, sessionSeed, loss, fn, 125)
+}
+
+func runSessionCycle(t *testing.T, k, blen int, sessionSeed uint32, loss int, fn func(uint32, int) (int, []bool), cycleMulPct int) (float64, bool) {
 	old := selectionsFn
 	selectionsFn = fn
 	defer func() { selectionsFn = old }()
@@ -58,9 +62,29 @@ func runSession(t *testing.T, k, blen int, sessionSeed uint32, loss int, fn func
 	for i := 0; i < size; i += 4 {
 		binary.LittleEndian.PutUint32(data[i:], r.Next32())
 	}
-	enc, err := NewEncoder(data, blen, sessionSeed)
-	if err != nil {
-		t.Fatal(err)
+	kGot := NumSourceBlocks(size, blen)
+	cycle := CycleLenMul(kGot, cycleMulPct)
+	if cycle < 32 {
+		cycle = 32
+	}
+	enc := &Encoder{data: data, blen: blen, k: kGot, cycle: cycle}
+	enc.srcs = make([][]byte, kGot)
+	for i := 0; i < kGot; i++ {
+		enc.srcs[i] = enc.srcPadded(i)
+	}
+	{
+		p := NewPRNG(uint64(sessionSeed))
+		acc := make([]byte, blen)
+		for id := kGot; id < cycle; id++ {
+			for {
+				s := p.Next32() % seedLimit
+				empty, ok := enc.xorForSeed(s, acc)
+				if ok && !empty {
+					enc.seeds = append(enc.seeds, s)
+					break
+				}
+			}
+		}
 	}
 	dec, err := NewDecoder(k, blen, size)
 	if err != nil {
@@ -131,6 +155,30 @@ func TestDistributionStudy(t *testing.T) {
 					}
 				}
 				fmt.Printf("%-11s %-6d %-5d %d%% | %.2f\n", it.name, k, loss,
+					100*okCount/seeds, sum/float64(seeds))
+			}
+		}
+	}
+}
+
+// TestCycleStudy compares cycle multipliers (spec-v2 distribution fixed).
+// Metric: fed/K until solved (pass-based UX, max 3 passes).
+func TestCycleStudy(t *testing.T) {
+	fmt.Printf("%-9s %-6s %-5s %s\n", "cycle", "K", "loss%", "solve% | avg fed/K")
+	for _, mul := range []int{125, 150, 160, 175, 200} {
+		for _, k := range []int{64, 256, 1024, 3616} {
+			for _, loss := range []int{10, 20, 30} {
+				var sum float64
+				const seeds = 5
+				okCount := 0
+				for s := 0; s < seeds; s++ {
+					ov, ok := runSessionCycle(t, k, 2900, uint32(1000+s*77), loss, selectionsSpec, mul)
+					if ok {
+						sum += ov
+						okCount++
+					}
+				}
+				fmt.Printf("%-9d %-6d %-5d %d%% | %.2f\n", mul, k, loss,
 					100*okCount/seeds, sum/float64(seeds))
 			}
 		}

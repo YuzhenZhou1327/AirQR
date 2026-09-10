@@ -43,9 +43,12 @@ func NumSourceBlocks(size, blen int) int {
 	return (size + blen - 1) / blen
 }
 
-// CycleLen returns the slot-space size: max(32, ceil(1.25*K)).
-func CycleLen(k int) int {
-	c := (k*5 + 3) / 4
+// CycleLen returns the default slot-space size (PROTOCOL §5: 1.25×K).
+func CycleLen(k int) int { return CycleLenMul(k, 125) }
+
+// CycleLenMul returns max(32, ceil(mul% × K)); mul is a percentage (125=1.25×).
+func CycleLenMul(k, mul int) int {
+	c := (k*mul + 99) / 100
 	if c < 32 {
 		c = 32
 	}

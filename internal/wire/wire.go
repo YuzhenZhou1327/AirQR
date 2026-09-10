@@ -73,8 +73,10 @@ func ParseBlock(payload []byte) (Block, error) {
 	if len(b.Data) == 0 {
 		return Block{}, rejectf("empty block_data")
 	}
-	if uint32(len(b.Data)) > b.Blen {
-		return Block{}, rejectf("data %d > blen %d", len(b.Data), b.Blen)
+	// block_data = 4B seed + payload(≤blen): source blocks carry
+	// 4+min(blen,rest), LT blocks exactly 4+blen (PROTOCOL §2).
+	if len(b.Data) > int(b.Blen)+4 {
+		return Block{}, rejectf("data %d > 4+blen %d", len(b.Data), b.Blen)
 	}
 	return b, nil
 }
