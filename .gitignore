@@ -1,0 +1,5 @@
+dist/
+*.apk
+frames/
+__pycache__/
+*.pyc
