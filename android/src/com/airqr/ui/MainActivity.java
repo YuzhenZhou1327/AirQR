@@ -7,7 +7,8 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
-import android.view.SurfaceView;
+import android.view.TextureView;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ProgressBar;
@@ -32,13 +33,12 @@ import java.nio.charset.StandardCharsets;
  * Test QR: a BLOCK frame with tid=0xFFFFFFFF & id=0xFFFFFFFF (wire-valid but
  * impossible in a real session since id < cycle ≤ 8192) shows "test received".
  */
-public class MainActivity extends Activity implements FountainSession.Listener,
-        android.view.SurfaceHolder.Callback {
+public class MainActivity extends Activity implements FountainSession.Listener {
 
     private CameraController camera;
     private QrGridAnalyzer analyzer;
     private FountainSession session;
-    private SurfaceView preview;
+    private TextureView preview;
     private View startPanel, scanPanel, donePanel;
     private TextView statusText, fileText, doneText;
     private ProgressBar progress;
@@ -59,6 +59,12 @@ public class MainActivity extends Activity implements FountainSession.Listener,
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         preview = findViewById(R.id.preview);
+        preview.setOnTouchListener((v, ev) -> {
+            if (ev.getAction() == android.view.MotionEvent.ACTION_DOWN && camera != null) {
+                camera.focusAt(ev.getX() / preview.getWidth(), ev.getY() / preview.getHeight());
+            }
+            return true;
+        });
         startPanel = findViewById(R.id.start_panel);
         scanPanel = findViewById(R.id.scan_panel);
         statusText = findViewById(R.id.status);
@@ -75,26 +81,19 @@ public class MainActivity extends Activity implements FountainSession.Listener,
         session = new FountainSession(this);
         analyzer = new QrGridAnalyzer();
         statusText.setText(R.string.scanning);
-        preview.getHolder().addCallback(this);
-    }
-
-    // ---- SurfaceHolder.Callback: camera waits for a real surface ----
-
-    @Override
-    public void surfaceCreated(android.view.SurfaceHolder holder) {
-        surfaceReady = true;
-        if (scanning && camera == null) startCamera();
-    }
-
-    @Override
-    public void surfaceChanged(android.view.SurfaceHolder holder, int format, int width, int height) {
-        // preview size handled inside CameraController; nothing to do
-    }
-
-    @Override
-    public void surfaceDestroyed(android.view.SurfaceHolder holder) {
-        surfaceReady = false;
-        stopCamera();
+        preview.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+            @Override public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture st, int w, int h) {
+                surfaceReady = true;
+                if (scanning && camera == null) startCamera();
+            }
+            @Override public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture st, int w, int h) { }
+            @Override public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture st) {
+                surfaceReady = false;
+                stopCamera();
+                return true;
+            }
+            @Override public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture st) { }
+        });
     }
 
     private void beginTransfer() {
@@ -125,8 +124,11 @@ public class MainActivity extends Activity implements FountainSession.Listener,
         if (surfaceReady) startCamera(); // else: surfaceCreated will fire
     }
 
+    private final android.os.Handler diagHandler = new android.os.Handler();
+
     private void startCamera() {
         if (camera != null || !surfaceReady) return; // wait for surface
+        diagHandler.postDelayed(diagTick, 3000); // on-screen decode diagnostics
         camera = new CameraController(preview, (nv21, w, h) -> {
             if (completed) return;
             analyzer.analyze(nv21, w, h, payload -> {
@@ -148,6 +150,19 @@ public class MainActivity extends Activity implements FountainSession.Listener,
             statusText.setText(R.string.need_camera);
         }
     }
+
+    private final Runnable diagTick = new Runnable() {
+        @Override public void run() {
+            if (!completed && camera != null) {
+                long fa = analyzer.framesAnalyzed;
+                long pc = analyzer.payloadCount;
+                if (fa > 0 && pc == 0 && session.info() == null) {
+                    statusText.setText(getString(R.string.diag_fmt, fa, analyzer.lastStage));
+                }
+                diagHandler.postDelayed(this, 3000);
+            }
+        }
+    };
 
     private static long u32le(byte[] b, int off) {
         return (b[off] & 0xFFL) | ((b[off + 1] & 0xFFL) << 8)

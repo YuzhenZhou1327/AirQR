@@ -36,6 +36,10 @@ public final class QrGridAnalyzer {
     private final MultiFormatReader reader = new MultiFormatReader();
     private final Map<DecodeHintType, Object> hints = new EnumMap<>(DecodeHintType.class);
     private long lastLog = 0;
+    // Field-diagnostics counters (read from the UI thread to show on screen)
+    public volatile long framesAnalyzed = 0;
+    public volatile long payloadCount = 0;
+    public volatile String lastStage = "init";
 
     public QrGridAnalyzer() {
         hints.put(DecodeHintType.TRY_HARDER, Boolean.TRUE);
@@ -66,19 +70,24 @@ public final class QrGridAnalyzer {
         com.google.zxing.LuminanceSource rot = src.isRotateSupported()
                 ? src.rotateCounterClockwise() : src;
 
+        framesAnalyzed++;
         int total = 0;
         // Stage 1: whole frame, global histogram binarizer
+        lastStage = "full-global";
         total += scanAll(rot, false, sink, "full-global");
         // Stage 2: quadrants, global
         if (total == 0) {
+            lastStage = "quadrants";
             for (LuminanceSource q : quadrants(rot)) {
                 total += scanAll(q, false, sink, "quad-global");
             }
         }
         // Stage 3: whole frame, hybrid
         if (total == 0) {
+            lastStage = "full-hybrid";
             total += scanAll(rot, true, sink, "full-hybrid");
         }
+        payloadCount += total;
         if (total == 0) {
             logThrottled("no codes; rotSize=" + rot.getWidth() + "x" + rot.getHeight()
                     + " luma[min=" + lumaMin(rot) + " max=" + lumaMax(rot) + "]");
