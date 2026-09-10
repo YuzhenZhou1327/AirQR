@@ -19,9 +19,12 @@
 | 2 | 4 | transfer_id | uint32 LE，会话随机 ID |
 | 6 | 4 | block_len | uint32 LE，喷泉块长（字节） |
 | 10 | 4 | block_id | uint32 LE；`id < K` 为源块，`≥ K` 为 LT 冗余块 |
-| 14 | B | block_data | LT 块本体（§4 格式） |
+| 14 | 4 | crc32 | IEEE CRC-32（多项式 0xEDB88320）of `block_data`，uint32 LE |
+| 18 | B | block_data | LT 块本体（§4 格式） |
 
-- 头共 14 字节，全部小端。QR payload 总长 `14 + block_data`。
+- 头共 18 字节，全部小端。QR payload 总长 `18 + block_data`。
+- **crc32 校验**：接收端对 `block_data` 重算 CRC，不匹配则整帧丢弃（防 QR ECC 漏检的
+  位翻转静默污染 LT 剥离链）。CRC 覆盖 `block_data`（含 4B seed 字段）。
 - `block_data` 校验规则：`1 ≤ len(block_data) ≤ 4 + block_len`
   （源块 = 4B seed + min(blen, 剩余)；LT 块 = 4B seed + blen）。
 - QR 版本/ECC 由 preset 决定。推荐 v40-L：binary 容量 2953B → `block_len ≤ 2939`，默认 2900。

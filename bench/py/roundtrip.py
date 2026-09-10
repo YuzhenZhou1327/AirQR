@@ -63,13 +63,21 @@ def cycle_len(k: int) -> int:
     return max(32, (k * 5 + 3) // 4)
 
 
+def _crc32(d: bytes) -> int:
+    import zlib
+    return zlib.crc32(d) & 0xFFFFFFFF
+
+
 def parse_block(payload: bytes) -> dict:
     assert payload[0] == 0x51, "magic"
     assert payload[1] == 1, "version"
     tid = int.from_bytes(payload[2:6], "little")
     blen = int.from_bytes(payload[6:10], "little")
     bid = int.from_bytes(payload[10:14], "little")
-    return {"tid": tid, "blen": blen, "id": bid, "data": payload[14:]}
+    crc = int.from_bytes(payload[14:18], "little")
+    data = payload[18:]
+    assert crc == _crc32(data), "crc mismatch"
+    return {"tid": tid, "blen": blen, "id": bid, "crc": crc, "data": data}
 
 
 def decode_frames(frames_dir: Path) -> dict:

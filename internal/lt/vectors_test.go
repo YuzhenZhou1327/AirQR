@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,13 +12,14 @@ import (
 )
 
 func packBlockForVectors(tid, blen, id uint32, data []byte) []byte {
-	out := make([]byte, 14+len(data))
+	out := make([]byte, 18+len(data))
 	out[0] = 0x51
 	out[1] = 1
 	binary.LittleEndian.PutUint32(out[2:], tid)
 	binary.LittleEndian.PutUint32(out[6:], blen)
 	binary.LittleEndian.PutUint32(out[10:], id)
-	copy(out[14:], data)
+	binary.LittleEndian.PutUint32(out[14:], crc32.ChecksumIEEE(data))
+	copy(out[18:], data)
 	return out
 }
 

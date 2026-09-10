@@ -84,7 +84,7 @@ def main():
             for hdr, payload in known.items():
                 tid = int.from_bytes(payload[2:6], "little")
                 bid = int.from_bytes(payload[10:14], "little")
-                data = payload[14:]
+                data = payload[18:]
                 seed = int.from_bytes(data[:4], "little")
                 bytid.setdefault(tid, {}).setdefault(bid, (seed, data[4:]))
             slots = bytid.get(manifest["tid"], {})

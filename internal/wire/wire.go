@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"strconv"
 )
 
@@ -15,8 +16,8 @@ const (
 	Magic = 0x51
 	// Version is the current protocol version.
 	Version = 1
-	// HeaderLen is the BLOCK header size (magic,version,tid,blen,id).
-	HeaderLen = 14
+	// HeaderLen is the BLOCK header size (magic,version,tid,blen,id,crc32).
+	HeaderLen = 18
 	// ManifestFormatTag appears in every MANIFEST JSON.
 	ManifestFormatTag = "airqr1"
 )
@@ -29,7 +30,8 @@ func rejectf(format string, a ...any) error {
 }
 
 // PackBlock builds one BLOCK QR payload:
-// [0]=magic [1]=version [2:6]=tid LE [6:10]=blen LE [10:14]=id LE [14:]=data.
+// [0]=magic [1]=version [2:6]=tid LE [6:10]=blen LE [10:14]=id LE
+// [14:18]=crc32(block_data) LE [18:]=data.
 func PackBlock(tid, blen, id uint32, data []byte) []byte {
 	out := make([]byte, HeaderLen+len(data))
 	out[0] = Magic
@@ -37,6 +39,7 @@ func PackBlock(tid, blen, id uint32, data []byte) []byte {
 	binary.LittleEndian.PutUint32(out[2:], tid)
 	binary.LittleEndian.PutUint32(out[6:], blen)
 	binary.LittleEndian.PutUint32(out[10:], id)
+	binary.LittleEndian.PutUint32(out[14:], crc32.ChecksumIEEE(data))
 	copy(out[HeaderLen:], data)
 	return out
 }
@@ -46,6 +49,7 @@ type Block struct {
 	TID    uint32
 	Blen   uint32
 	ID     uint32
+	CRC    uint32
 	Data   []byte // alias into the input slice; do not retain without copying
 }
 
@@ -65,6 +69,7 @@ func ParseBlock(payload []byte) (Block, error) {
 		TID:  binary.LittleEndian.Uint32(payload[2:]),
 		Blen: binary.LittleEndian.Uint32(payload[6:]),
 		ID:   binary.LittleEndian.Uint32(payload[10:]),
+		CRC:  binary.LittleEndian.Uint32(payload[14:]),
 		Data: payload[HeaderLen:],
 	}
 	if b.Blen == 0 {
@@ -72,6 +77,10 @@ func ParseBlock(payload []byte) (Block, error) {
 	}
 	if len(b.Data) == 0 {
 		return Block{}, rejectf("empty block_data")
+	}
+	// CRC over block_data (incl. 4B seed) — drops ECC-leaked bit flips.
+	if b.CRC != crc32.ChecksumIEEE(b.Data) {
+		return Block{}, rejectf("crc mismatch: hdr=%#08x calc=%#08x", b.CRC, crc32.ChecksumIEEE(b.Data))
 	}
 	// block_data = 4B seed + payload(≤blen): source blocks carry
 	// 4+min(blen,rest), LT blocks exactly 4+blen (PROTOCOL §2).

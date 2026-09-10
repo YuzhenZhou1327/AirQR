@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets;
 public final class Wire {
     public static final byte MAGIC = 0x51; // 'Q'
     public static final int VERSION = 1;
-    public static final int HEADER_LEN = 14;
+    public static final int HEADER_LEN = 18;
     public static final String MANIFEST_TAG = "airqr1";
 
     private Wire() {}
@@ -18,6 +18,7 @@ public final class Wire {
         public long tid;      // unsigned 32 in a long
         public long blen;
         public long id;
+        public long crc;      // unsigned 32 in a long
         public byte[] data;
 
         public int dataLen() { return data.length; }
@@ -42,6 +43,31 @@ public final class Wire {
         return 4 + (int) blen;
     }
 
+    private static final int[] CRC_TABLE = buildCrcTable();
+
+    private static int[] buildCrcTable() {
+        int[] t = new int[256];
+        for (int n = 0; n < 256; n++) {
+            int c = n;
+            for (int k = 0; k < 8; k++) {
+                c = ((c & 1) != 0) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+            }
+            t[n] = c;
+        }
+        return t;
+    }
+
+    /** IEEE CRC-32 (matches java.util.zip.CRC32 / Go crc32.ChecksumIEEE). */
+    public static long crc32(byte[] data, int off, int len) {
+        long c = 0xFFFFFFFFL;
+        for (int i = off; i < off + len; i++) {
+            // table entries are 32-bit UNSIGNED patterns stored in int (may be
+            // negative): mask to unsigned before widening into the long state.
+            c = ((long) CRC_TABLE[(int) ((c ^ data[i]) & 0xFF)] & 0xFFFFFFFFL) ^ (c >>> 8);
+        }
+        return (c ^ 0xFFFFFFFFL) & 0xFFFFFFFFL;
+    }
+
     public static Block parseBlock(byte[] p) throws RejectException {
         return parseBlock(p, 0, p.length);
     }
@@ -51,14 +77,18 @@ public final class Wire {
         if (len - off < HEADER_LEN) throw new RejectException("short payload " + (len - off));
         if (p[off] != MAGIC) throw new RejectException("magic");
         if (p[off + 1] != VERSION) throw new RejectException("version " + p[off + 1]);
+        if (len - off < HEADER_LEN + 1) throw new RejectException("no data after header");
         Block b = new Block();
         b.tid = u32le(p, off + 2);
         b.blen = u32le(p, off + 6);
         b.id = u32le(p, off + 10);
+        b.crc = u32le(p, off + 14);
         b.data = new byte[len - off - HEADER_LEN];
         System.arraycopy(p, off + HEADER_LEN, b.data, 0, b.data.length);
         if (b.blen == 0) throw new RejectException("blen=0");
         if (b.data.length == 0) throw new RejectException("empty block_data");
+        // CRC over block_data (incl. 4B seed); PROTOCOL §2
+        if (crc32(b.data, 0, b.data.length) != b.crc) throw new RejectException("crc mismatch");
         // block_data = 4B seed + payload(<=blen); PROTOCOL §2
         if (b.data.length > b.blen + 4) throw new RejectException("data>4+blen");
         return b;

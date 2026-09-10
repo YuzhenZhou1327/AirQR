@@ -30,7 +30,7 @@ def bursty_loss(pngs, drop_prob, rng):
                 continue
             if rng.random() < drop_prob:
                 continue
-            keep.setdefault(payload[:14], payload)
+            keep.setdefault(payload[:18], payload)
     return keep
 
 
@@ -54,7 +54,7 @@ def main():
                 continue
             tid = int.from_bytes(payload[2:6], "little")
             bid = int.from_bytes(payload[10:14], "little")
-            data = payload[14:]
+            data = payload[18:]
             seed = int.from_bytes(data[:4], "little")
             bytid.setdefault(tid, {}).setdefault(bid, (seed, data[4:]))
         k = man["k"]
