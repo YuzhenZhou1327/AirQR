@@ -25,6 +25,8 @@ public final class FountainSession {
         public int blen;
         public int k;
         public int zstd;
+        /** On-screen grid cells (0 = unknown, pre-grid sender). */
+        public int grid;
     }
 
     private ManifestInfo info;
@@ -57,6 +59,7 @@ public final class FountainSession {
             info.blen = m.blen;
             info.k = m.k;
             info.zstd = m.zstd;
+            info.grid = m.grid;
             decoder = new LtDecoder(m.k, m.blen, (int) m.size);
             listener.onManifest(info);
             // flush buffered blocks belonging to this tid

@@ -17,6 +17,13 @@
         android:scaleType="fitCenter"
         android:visibility="gone" />
 
+    <!-- 取景框引导：把屏幕装进框内，码越大解得越快 -->
+    <com.airqr.ui.FrameGuideView
+        android:id="@+id/frame_guide"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
     <!-- 欢迎页：进入 App 时的开始界面 -->
     <LinearLayout
         android:id="@+id/start_panel"

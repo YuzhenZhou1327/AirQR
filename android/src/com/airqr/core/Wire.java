@@ -102,6 +102,8 @@ public final class Wire {
         public int blen;
         public int k;
         public int zstd;
+        /** On-screen cell count (§2 GridGeom 1/2/4/6/8); 0 = unknown (pre-grid sender). */
+        public int grid;
     }
 
     public static Manifest parseManifest(byte[] payload) throws RejectException {
@@ -118,8 +120,19 @@ public final class Wire {
         m.blen = (int) parseU32(f.get("blen"), 0xFFFFFFFFL);
         m.k = (int) parseU32(f.get("k"), 0xFFFFFFFFL);
         m.zstd = (int) parseU32(f.get("zstd"), 0xFFFFFFFFL);
+        // grid is optional: absent (pre-grid sender) = 0 = unknown
+        String gs = f.get("grid");
+        if (gs != null) {
+            m.grid = (int) parseU32(gs, 255);
+        }
         if (m.size < 1 || m.blen < 1 || m.k < 1 || (m.zstd != 0 && m.zstd != 1))
             throw new RejectException("field range");
+        switch (m.grid) {
+            case 0: case 1: case 2: case 4: case 6: case 8:
+                break;
+            default:
+                throw new RejectException("grid " + m.grid);
+        }
         if (m.blen > 2939) throw new RejectException("blen too large");
         return m;
     }

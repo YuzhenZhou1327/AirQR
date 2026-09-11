@@ -46,6 +46,15 @@ public final class CameraController {
         try {
             p.setFocusMode(android.hardware.Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
         } catch (Exception ignore) { }
+        // Screens are bright light sources: a mild negative bias fights
+        // night-time blowout while AE keeps adapting around it.
+        try {
+            if (p.getMinExposureCompensation() < 0) {
+                p.setExposureCompensation(Math.max(p.getMinExposureCompensation(), -1));
+                android.util.Log.i(TAG, "exposure compensation set to "
+                        + p.getExposureCompensation());
+            }
+        } catch (Exception ignore) { }
         camera.setParameters(p);
 
         final int w = previewW, h = previewH;

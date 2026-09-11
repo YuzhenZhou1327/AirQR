@@ -169,10 +169,12 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         diagHandler.postDelayed(diagTick, 3000); // on-screen decode diagnostics
         camera = new CameraController(preview, (nv21, w, h) -> {
             if (completed || analyzer.shouldSkip()) return;
-            analyzer.analyze(nv21, w, h, makeSink());
+            analyzer.analyze(nv21, w, h, sessionGrid(), makeSink());
         });
         try {
             camera.start();
+            findViewById(R.id.frame_guide).setVisibility(View.VISIBLE);
+            startLightSensor();
         } catch (SecurityException e) {
             statusText.setText(R.string.need_camera);
         }
@@ -204,7 +206,7 @@ public class MainActivity extends Activity implements FountainSession.Listener {
             iv.setVisibility(View.VISIBLE);
             mockCamera = new MockCamera(bmp, (nv21, w, h) -> {
                 if (analyzer.shouldSkip()) return;
-                analyzer.analyze(nv21, w, h, makeSink());
+                analyzer.analyze(nv21, w, h, sessionGrid(), makeSink());
             });
             statusText.setText(R.string.selftest_running);
             android.util.Log.i("AirQR", "self-test started: bitmap "
@@ -247,6 +249,59 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         }
     };
 
+    /** Manifest grid for cell splits (0 = unknown → 2x2 sender default). */
+    private int sessionGrid() {
+        FountainSession.ManifestInfo i = session.info();
+        return i == null ? 0 : i.grid;
+    }
+
+    // ---- ambient-light auto-torch (dark rooms / night) ----
+    private android.hardware.SensorManager sensorManager;
+    private android.hardware.Sensor lightSensor;
+    private boolean torchOn = false;
+    private final android.hardware.SensorEventListener lightListener =
+            new android.hardware.SensorEventListener() {
+                @Override public void onSensorChanged(android.hardware.SensorEvent e) {
+                    if (camera == null || completed) return;
+                    float lux = e.values[0];
+                    try {
+                        if (!torchOn && lux < 45) {
+                            torchOn = true;
+                            camera.setTorch(true);
+                            android.util.Log.i("AirQR", "auto-torch ON (lux=" + lux + ")");
+                        } else if (torchOn && lux > 450) {
+                            torchOn = false;
+                            camera.setTorch(false);
+                            android.util.Log.i("AirQR", "auto-torch OFF (lux=" + lux + ")");
+                        }
+                    } catch (Exception ignore) { }
+                }
+                @Override public void onAccuracyChanged(android.hardware.Sensor s, int a) { }
+            };
+
+    private void startLightSensor() {
+        try {
+            if (sensorManager == null) {
+                sensorManager = (android.hardware.SensorManager) getSystemService(SENSOR_SERVICE);
+            }
+            if (sensorManager == null) return;
+            lightSensor = sensorManager.getDefaultSensor(android.hardware.Sensor.TYPE_LIGHT);
+            if (lightSensor != null) {
+                sensorManager.registerListener(lightListener, lightSensor,
+                        android.hardware.SensorManager.SENSOR_DELAY_NORMAL);
+            }
+        } catch (Exception e) {
+            android.util.Log.i("AirQR", "light sensor unavailable: " + e);
+        }
+    }
+
+    private void stopLightSensor() {
+        torchOn = false;
+        try {
+            if (sensorManager != null) sensorManager.unregisterListener(lightListener);
+        } catch (Exception ignore) { }
+    }
+
     private static long u32le(byte[] b, int off) {
         return (b[off] & 0xFFL) | ((b[off + 1] & 0xFFL) << 8)
                 | ((b[off + 2] & 0xFFL) << 16) | ((b[off + 3] & 0xFFL) << 24);
@@ -270,6 +325,10 @@ public class MainActivity extends Activity implements FountainSession.Listener {
     }
 
     private void stopCamera() {
+        stopLightSensor();
+        try {
+            findViewById(R.id.frame_guide).setVisibility(View.GONE);
+        } catch (Exception ignore) { }
         if (mockCamera != null) {
             mockCamera.stop();
             mockCamera = null;

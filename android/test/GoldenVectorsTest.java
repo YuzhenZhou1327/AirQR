@@ -95,6 +95,7 @@ public class GoldenVectorsTest {
             assertEquals(v.k(), m.k, v.name());
             assertEquals("vectors.bin", m.name, v.name());
             assertEquals(v.file().length, m.size, v.name());
+            assertEquals(2, m.grid, v.name() + ": grid");
         }
     }
 

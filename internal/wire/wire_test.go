@@ -43,7 +43,7 @@ func TestBlockReject(t *testing.T) {
 }
 
 func TestManifestRoundTrip(t *testing.T) {
-	m := Manifest{TID: 305419896, Name: "report.pdf", Size: 1048576, Blen: 2900, K: 362, Zstd: 0}
+	m := Manifest{TID: 305419896, Name: "report.pdf", Size: 1048576, Blen: 2900, K: 362, Zstd: 0, Grid: 4}
 	j, err := PackManifest(m)
 	if err != nil {
 		t.Fatal(err)
@@ -67,6 +67,9 @@ func TestManifestFieldOrderAgnostic(t *testing.T) {
 	if m.TID != 42 || m.Name != "a.bin" || m.Size != 1048576 || m.Blen != 2900 || m.K != 362 || m.Zstd != 0 {
 		t.Fatalf("fields wrong: %+v", m)
 	}
+	if m.Grid != 0 {
+		t.Fatalf("absent grid must parse as 0 (unknown), got %+v", m)
+	}
 }
 
 func TestManifestReject(t *testing.T) {
@@ -79,6 +82,8 @@ func TestManifestReject(t *testing.T) {
 		"neg-size":    `{"fmt":"airqr1","tid":1,"name":"a","size":-1,"blen":10,"k":1,"zstd":0}`,
 		"bad-blen":    `{"fmt":"airqr1","tid":1,"name":"a","size":1,"blen":0,"k":1,"zstd":0}`,
 		"bad-zstd":    `{"fmt":"airqr1","tid":1,"name":"a","size":1,"blen":10,"k":1,"zstd":2}`,
+		"bad-grid":    `{"fmt":"airqr1","tid":1,"name":"a","size":1,"blen":10,"k":1,"zstd":0,"grid":3}`,
+		"grid-text":   `{"fmt":"airqr1","tid":1,"name":"a","size":1,"blen":10,"k":1,"zstd":0,"grid":"x"}`,
 		"bad-tid":     `{"fmt":"airqr1","tid":0,"name":"a","size":1,"blen":10,"k":1,"zstd":0}`,
 		"missing-key": `{"fmt":"airqr1","tid":1,"name":"a","size":1,"blen":10,"k":1}`,
 		"not-object":  `"airqr1"`,

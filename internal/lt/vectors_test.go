@@ -74,7 +74,7 @@ func TestGenerateGoldenVectors(t *testing.T) {
 			allPayload = append(allPayload, packBlockForVectors(tid, uint32(blen), uint32(id), enc.BlockData(id))...)
 		}
 		man := `{"fmt":"airqr1","tid":` + u32s(tid) + `,"name":"vectors.bin","size":` + itoa(len(data)) +
-			`,"blen":` + itoa(blen) + `,"k":` + itoa(enc.K()) + `,"zstd":0}`
+			`,"blen":` + itoa(blen) + `,"k":` + itoa(enc.K()) + `,"zstd":0,"grid":2}`
 		// selection vectors: fixed seeds x this case's K (pure function of the
 		// reference implementation; the JVM side must reproduce them bit-exact).
 		selSeeds := []uint32{1, 2, 12345, 777}

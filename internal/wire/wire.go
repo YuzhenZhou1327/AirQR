@@ -98,6 +98,9 @@ type Manifest struct {
 	Blen int
 	K    int
 	Zstd int
+	// Grid is the on-screen cell count (PROTOCOL §2 GridGeom: 1/2/4/6/8).
+	// 0/absent = unknown (pre-grid senders); receivers fall back to halves.
+	Grid int
 }
 
 // ValidName enforces the manifest name charset (ASCII printable 0x20–0x7E
@@ -123,8 +126,13 @@ func PackManifest(m Manifest) ([]byte, error) {
 	if m.TID == 0 {
 		return nil, rejectf("tid must be nonzero")
 	}
-	j := fmt.Sprintf(`{"fmt":"%s","tid":%d,"name":"%s","size":%d,"blen":%d,"k":%d,"zstd":%d}`,
-		ManifestFormatTag, m.TID, m.Name, m.Size, m.Blen, m.K, m.Zstd)
+	switch m.Grid {
+	case 0, 1, 2, 4, 6, 8:
+	default:
+		return nil, rejectf("grid %d", m.Grid)
+	}
+	j := fmt.Sprintf(`{"fmt":"%s","tid":%d,"name":"%s","size":%d,"blen":%d,"k":%d,"zstd":%d,"grid":%d}`,
+		ManifestFormatTag, m.TID, m.Name, m.Size, m.Blen, m.K, m.Zstd, m.Grid)
 	return []byte(j), nil
 }
 
@@ -165,8 +173,21 @@ func ParseManifest(payload []byte) (Manifest, error) {
 			m.Zstd = int(v)
 		}
 	}
+	// grid is optional (absent = 0 = unknown, pre-grid senders stay valid)
+	if g, ok := fields["grid"]; ok {
+		v, err := strconv.ParseUint(g, 10, 8)
+		if err != nil {
+			return m, rejectf("grid %q", g)
+		}
+		m.Grid = int(v)
+	}
 	if m.Size < 1 || m.Blen < 1 || m.K < 1 || (m.Zstd != 0 && m.Zstd != 1) {
 		return m, rejectf("field range")
+	}
+	switch m.Grid {
+	case 0, 1, 2, 4, 6, 8:
+	default:
+		return m, rejectf("grid %d", m.Grid)
 	}
 	if m.TID == 0 {
 		return m, rejectf("tid must be nonzero")

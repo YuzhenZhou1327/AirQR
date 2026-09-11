@@ -191,7 +191,7 @@ func renderFrames(path, out string, grid, version int, ecc string, width, height
 		die("file name %q violates manifest charset; rename the file", name)
 	}
 	man, err := wire.PackManifest(wire.Manifest{
-		TID: uint32(tid), Name: name, Size: len(data), Blen: blen, K: k, Zstd: 0,
+		TID: uint32(tid), Name: name, Size: len(data), Blen: blen, K: k, Zstd: 0, Grid: grid,
 	})
 	if err != nil {
 		die("%v", err)
@@ -348,7 +348,7 @@ func renderCmd(args []string) {
 		die("file name %q violates manifest charset; rename the file", name)
 	}
 	man, err := wire.PackManifest(wire.Manifest{
-		TID: uint32(*tid), Name: name, Size: len(data), Blen: blen, K: k, Zstd: 0,
+		TID: uint32(*tid), Name: name, Size: len(data), Blen: blen, K: k, Zstd: 0, Grid: *grid,
 	})
 	if err != nil {
 		die("%v", err)
