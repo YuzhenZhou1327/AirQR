@@ -142,7 +142,6 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         scanPanel.setVisibility(View.VISIBLE);
         preview.setVisibility(View.VISIBLE);
         scanning = true;
-        enableOrientListener();
         if (surfaceReady) startCamera(); // else: surfaceCreated will fire
     }
 
@@ -167,6 +166,18 @@ public class MainActivity extends Activity implements FountainSession.Listener {
     private void startCamera() {
         if (camera != null || !surfaceReady) return; // wait for surface
         if (mockCamera != null) return; // self-test owns the analyzer
+        // Fresh display orientation for this start (no restart here: the
+        // controller below is constructed with it).
+        camSensorOrientation = probeBackCameraOrientation();
+        int rot = activityRotationDeg();
+        if (rot >= 0) {
+            int disp = (camSensorOrientation - rot + 360) % 360;
+            if (disp != displayOrientation) {
+                displayOrientation = disp;
+                android.util.Log.i("AirQR", "display orientation -> " + disp
+                        + " (activity rot " + rot + ", at start)");
+            }
+        }
         diagHandler.postDelayed(diagTick, 3000); // on-screen decode diagnostics
         camera = new CameraController(preview, (nv21, w, h) -> {
             if (completed || analyzer.shouldSkip()) return;
@@ -308,15 +319,13 @@ public class MainActivity extends Activity implements FountainSession.Listener {
     }
 
     // ---- hold orientation (portrait vs landscape) ----
-    // The activity is portrait-locked, but the user may hold the phone
-    // landscape: the sensor buffer is identical either way, only the
-    // world→buffer rotation changes. Track it for upright preview (display
-    // orientation), tap-to-focus mapping and grid transposition.
-    private android.view.OrientationEventListener orientListener;
-    private int deviceBucket = -1; // 0/90/180/270, -1 = unknown yet
+    // Driven by the ACTIVITY's display rotation (fullSensor manifest): the
+    // activity only rotates when the system is sure about the hold, so there
+    // is no extra sensor to get stuck, no buckets, no debounce hacks.
+    // (An OrientationEventListener design was prototyped and rejected: raw
+    // sensor belief can disagree with the UI with no independent arbiter.)
     private int displayOrientation = 90; // applied to the camera
     private int camSensorOrientation = 90; // probed from CameraInfo
-    private long lastOrientSwitch = 0;
 
     /** Back-camera sensor mount angle (AOSP display-orientation formula input). */
     @SuppressWarnings("deprecation")
@@ -335,43 +344,38 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         return 90;
     }
 
-    private void enableOrientListener() {
-        if (orientListener != null) return;
+    /** Current activity display rotation in degrees (0/90/180/270, -1 unknown). */
+    private int activityRotationDeg() {
         try {
-            camSensorOrientation = probeBackCameraOrientation();
-            orientListener = new android.view.OrientationEventListener(this) {
-                @Override public void onOrientationChanged(int angle) {
-                    if (angle < 0) return; // flat / unknown: keep last
-                    int bucket = (((angle + 45) / 90) % 4) * 90;
-                    if (bucket == deviceBucket) return;
-                    deviceBucket = bucket;
-                    // AOSP formula (back camera): undo world→sensor rotation
-                    int disp = (camSensorOrientation - bucket + 360) % 360;
-                    if (disp == displayOrientation) return;
-                    long now = android.os.SystemClock.elapsedRealtime();
-                    if (now - lastOrientSwitch < 800) return; // debounce
-                    lastOrientSwitch = now;
-                    displayOrientation = disp;
-                    android.util.Log.i("AirQR", "hold change: device=" + bucket
-                            + " display=" + disp);
-                    if (scanning && !completed && camera != null && mockCamera == null) {
-                        stopCamera();
-                        startCamera(); // picks up new display orientation
-                    }
-                }
-            };
-            if (orientListener.canDetectOrientation()) orientListener.enable();
-        } catch (Exception e) {
-            android.util.Log.i("AirQR", "orientation listener unavailable: " + e);
+            switch (getWindowManager().getDefaultDisplay().getRotation()) {
+                case android.view.Surface.ROTATION_90: return 90;
+                case android.view.Surface.ROTATION_180: return 180;
+                case android.view.Surface.ROTATION_270: return 270;
+                default: return 0;
+            }
+        } catch (Exception ignore) {
+            return -1;
         }
     }
 
-    private void disableOrientListener() {
-        try {
-            if (orientListener != null) orientListener.disable();
-        } catch (Exception ignore) { }
-        orientListener = null;
-        deviceBucket = -1;
+    /**
+     * Recomputes the camera display orientation from the activity rotation
+     * (AOSP back-camera formula) and restarts the camera on change.
+     * Safe to call any time; no-op unless the orientation actually changed.
+     */
+    private void recomputeDisplayOrientation(String why) {
+        int rot = activityRotationDeg();
+        if (rot < 0) return;
+        int disp = (camSensorOrientation - rot + 360) % 360;
+        if (disp == displayOrientation) return;
+        displayOrientation = disp;
+        android.util.Log.i("AirQR", "display orientation -> " + disp
+                + " (activity rot " + rot + ", sensor mount " + camSensorOrientation
+                + ", " + why + ")");
+        if (scanning && !completed && camera != null && mockCamera == null) {
+            stopCamera();
+            startCamera(); // picks up new display orientation
+        }
     }
 
     private static long u32le(byte[] b, int off) {
@@ -415,15 +419,15 @@ public class MainActivity extends Activity implements FountainSession.Listener {
     public void onConfigurationChanged(android.content.res.Configuration cfg) {
         super.onConfigurationChanged(cfg);
         // Views re-measure themselves (no activity recreation per manifest
-        // configChanges); the camera keeps streaming — just re-fit the
-        // preview transform + guide rect to the new geometry.
+        // configChanges); the display rotation may have changed with the hold:
+        // recompute (restarts camera only on real change), then re-fit.
+        recomputeDisplayOrientation("config-change");
         if (camera != null) camera.refreshLetterbox();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        disableOrientListener();
         stopCamera(); // surface is also destroyed → surfaceDestroyed handles state
     }
 
@@ -459,7 +463,6 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         completed = true;
         doneFile = file;
         doneName = info.name;
-        disableOrientListener();
         runOnUiThread(() -> {
             if (camera != null) {
                 camera.stop();
@@ -513,7 +516,6 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         statusText.setText(R.string.scanning);
         fileText.setText("");
         progress.setProgress(0);
-        enableOrientListener(); // was disabled on complete
         if (surfaceReady && camera == null) startCamera();
         // if surface not ready, surfaceCreated will restart the camera
     }
