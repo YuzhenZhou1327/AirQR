@@ -8,3 +8,4 @@ temp/
 android/keystore.properties
 airqr.exe
 android/build/
+test-classes/
