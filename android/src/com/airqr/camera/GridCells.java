@@ -18,15 +18,24 @@ public final class GridCells {
      * @return array of {x,y,width,height} in buffer coords, row-major
      */
     public static int[][] split(int w, int h, int grid, int overlapPct) {
-        int rows, cols;
+        int[] rc = rowsColsFor(grid);
+        return splitRC(w, h, rc[0], rc[1], overlapPct);
+    }
+
+    /** Maps manifest grid → {rows, cols} (PROTOCOL §2 GridGeom). */
+    public static int[] rowsColsFor(int grid) {
         switch (grid) {
-            case 1: rows = 1; cols = 1; break;
-            case 2: rows = 1; cols = 2; break;
-            case 4: rows = 2; cols = 2; break;
-            case 6: rows = 2; cols = 3; break;
-            case 8: rows = 2; cols = 4; break;
-            default: rows = 2; cols = 2; break; // unknown → sender default
+            case 1: return new int[]{1, 1};
+            case 2: return new int[]{1, 2};
+            case 4: return new int[]{2, 2};
+            case 6: return new int[]{2, 3};
+            case 8: return new int[]{2, 4};
+            default: return new int[]{2, 2}; // unknown → sender default
         }
+    }
+
+    /** Row-major split with overlap margin (clamped to the buffer). */
+    public static int[][] splitRC(int w, int h, int rows, int cols, int overlapPct) {
         int[][] out = new int[rows * cols][];
         int cw = w / cols, ch = h / rows;
         int ox = cw * overlapPct / 100, oy = ch * overlapPct / 100;

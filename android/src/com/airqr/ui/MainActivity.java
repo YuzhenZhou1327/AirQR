@@ -142,6 +142,7 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         scanPanel.setVisibility(View.VISIBLE);
         preview.setVisibility(View.VISIBLE);
         scanning = true;
+        enableOrientListener();
         if (surfaceReady) startCamera(); // else: surfaceCreated will fire
     }
 
@@ -169,8 +170,12 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         diagHandler.postDelayed(diagTick, 3000); // on-screen decode diagnostics
         camera = new CameraController(preview, (nv21, w, h) -> {
             if (completed || analyzer.shouldSkip()) return;
-            analyzer.analyze(nv21, w, h, sessionGrid(), makeSink());
+            analyzer.analyze(nv21, w, h, sessionGrid(), displayOrientation, makeSink());
         });
+        camera.setDisplayOrientation(displayOrientation);
+        try {
+            camera.setGuide((FrameGuideView) findViewById(R.id.frame_guide));
+        } catch (Exception ignore) { }
         try {
             camera.start();
             findViewById(R.id.frame_guide).setVisibility(View.VISIBLE);
@@ -206,7 +211,7 @@ public class MainActivity extends Activity implements FountainSession.Listener {
             iv.setVisibility(View.VISIBLE);
             mockCamera = new MockCamera(bmp, (nv21, w, h) -> {
                 if (analyzer.shouldSkip()) return;
-                analyzer.analyze(nv21, w, h, sessionGrid(), makeSink());
+                analyzer.analyze(nv21, w, h, sessionGrid(), displayOrientation, makeSink());
             });
             statusText.setText(R.string.selftest_running);
             android.util.Log.i("AirQR", "self-test started: bitmap "
@@ -302,6 +307,73 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         } catch (Exception ignore) { }
     }
 
+    // ---- hold orientation (portrait vs landscape) ----
+    // The activity is portrait-locked, but the user may hold the phone
+    // landscape: the sensor buffer is identical either way, only the
+    // world→buffer rotation changes. Track it for upright preview (display
+    // orientation), tap-to-focus mapping and grid transposition.
+    private android.view.OrientationEventListener orientListener;
+    private int deviceBucket = -1; // 0/90/180/270, -1 = unknown yet
+    private int displayOrientation = 90; // applied to the camera
+    private int camSensorOrientation = 90; // probed from CameraInfo
+    private long lastOrientSwitch = 0;
+
+    /** Back-camera sensor mount angle (AOSP display-orientation formula input). */
+    @SuppressWarnings("deprecation")
+    private static int probeBackCameraOrientation() {
+        try {
+            int n = android.hardware.Camera.getNumberOfCameras();
+            android.hardware.Camera.CameraInfo info =
+                    new android.hardware.Camera.CameraInfo();
+            for (int i = 0; i < n; i++) {
+                android.hardware.Camera.getCameraInfo(i, info);
+                if (info.facing == android.hardware.Camera.CameraInfo.CAMERA_FACING_BACK) {
+                    return info.orientation;
+                }
+            }
+        } catch (Exception ignore) { }
+        return 90;
+    }
+
+    private void enableOrientListener() {
+        if (orientListener != null) return;
+        try {
+            camSensorOrientation = probeBackCameraOrientation();
+            orientListener = new android.view.OrientationEventListener(this) {
+                @Override public void onOrientationChanged(int angle) {
+                    if (angle < 0) return; // flat / unknown: keep last
+                    int bucket = (((angle + 45) / 90) % 4) * 90;
+                    if (bucket == deviceBucket) return;
+                    deviceBucket = bucket;
+                    // AOSP formula (back camera): undo world→sensor rotation
+                    int disp = (camSensorOrientation - bucket + 360) % 360;
+                    if (disp == displayOrientation) return;
+                    long now = android.os.SystemClock.elapsedRealtime();
+                    if (now - lastOrientSwitch < 800) return; // debounce
+                    lastOrientSwitch = now;
+                    displayOrientation = disp;
+                    android.util.Log.i("AirQR", "hold change: device=" + bucket
+                            + " display=" + disp);
+                    if (scanning && !completed && camera != null && mockCamera == null) {
+                        stopCamera();
+                        startCamera(); // picks up new display orientation
+                    }
+                }
+            };
+            if (orientListener.canDetectOrientation()) orientListener.enable();
+        } catch (Exception e) {
+            android.util.Log.i("AirQR", "orientation listener unavailable: " + e);
+        }
+    }
+
+    private void disableOrientListener() {
+        try {
+            if (orientListener != null) orientListener.disable();
+        } catch (Exception ignore) { }
+        orientListener = null;
+        deviceBucket = -1;
+    }
+
     private static long u32le(byte[] b, int off) {
         return (b[off] & 0xFFL) | ((b[off + 1] & 0xFFL) << 8)
                 | ((b[off + 2] & 0xFFL) << 16) | ((b[off + 3] & 0xFFL) << 24);
@@ -342,6 +414,7 @@ public class MainActivity extends Activity implements FountainSession.Listener {
     @Override
     protected void onPause() {
         super.onPause();
+        disableOrientListener();
         stopCamera(); // surface is also destroyed → surfaceDestroyed handles state
     }
 
@@ -377,6 +450,7 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         completed = true;
         doneFile = file;
         doneName = info.name;
+        disableOrientListener();
         runOnUiThread(() -> {
             if (camera != null) {
                 camera.stop();
@@ -430,6 +504,7 @@ public class MainActivity extends Activity implements FountainSession.Listener {
         statusText.setText(R.string.scanning);
         fileText.setText("");
         progress.setProgress(0);
+        enableOrientListener(); // was disabled on complete
         if (surfaceReady && camera == null) startCamera();
         // if surface not ready, surfaceCreated will restart the camera
     }

@@ -100,8 +100,13 @@ public final class QrGridAnalyzer {
      * within the frame). Returns unique payload count.
      *
      * @param grid manifest grid (0 = unknown → 2x2 sender default)
+     * @param displayOrientation camera display rotation (0/90/180/270); at
+     *        90/270 the phone is held portrait so the world (and the sender
+     *        grid) appears transposed in the landscape buffer → split rows/cols
+     *        swapped. QR decode itself is rotation-invariant.
      */
-    public int analyze(byte[] nv21, int width, int height, int grid, Sink sink) {
+    public int analyze(byte[] nv21, int width, int height, int grid,
+                       int displayOrientation, Sink sink) {
         PlanarYUVLuminanceSource full;
         try {
             full = new PlanarYUVLuminanceSource(nv21, width, height, 0, 0, width, height, false);
@@ -119,7 +124,7 @@ public final class QrGridAnalyzer {
         framesAnalyzed++;
         int total;
         try {
-            total = decodeLadder(full, sub, grid, sink);
+            total = decodeLadder(full, sub, grid, displayOrientation, sink);
         } finally {
             busy = false;
         }
@@ -128,7 +133,7 @@ public final class QrGridAnalyzer {
     }
 
     private int decodeLadder(PlanarYUVLuminanceSource full, HalfSampleLuminanceSource sub,
-                             int grid, Sink sink) {
+                             int grid, int displayOrientation, Sink sink) {
         LuminanceSource varSrc = sub != null ? sub : full;
         double var = GridCells.lumaVariance(varSrc);
         lastVar = var;
@@ -137,6 +142,9 @@ public final class QrGridAnalyzer {
             logThrottled("gated: var=" + (int) var);
             return 0;
         }
+        // portrait hold (display 90/270) → world grid transposed in buffer
+        boolean transpose = displayOrientation == 90 || displayOrientation == 270;
+        String hold = transpose ? "P" : "L";
         Set<Long> seen = new HashSet<>();
         Sink dedup = payload -> {
             if (payload == null || payload.length == 0) return;
@@ -150,11 +158,11 @@ public final class QrGridAnalyzer {
         int r = (rung == 0 && sub == null) ? 1 : rung; // R0 needs subsample
         switch (r) {
             case 0:
-                n = scanCells(sub, grid, hintsFast, dedup);
+                n = scanCells(sub, grid, transpose, hintsFast, dedup);
                 stage = "r0/cell-sub";
                 break;
             case 1:
-                n = scanCells(full, grid, hintsFast, dedup);
+                n = scanCells(full, grid, transpose, hintsFast, dedup);
                 stage = "r1/cell-full";
                 break;
             case 2:
@@ -178,7 +186,7 @@ public final class QrGridAnalyzer {
             rung++;
             failStreak = 0;
         }
-        lastStage = stage + " " + String.format("%.1fms", lastMs);
+        lastStage = stage + " " + hold + " " + String.format("%.1fms", lastMs);
         if (n == 0) {
             logThrottled("no codes @" + lastStage + " var=" + (int) var
                     + " frame=" + full.getWidth() + "x" + full.getHeight());
@@ -189,14 +197,19 @@ public final class QrGridAnalyzer {
     }
 
     /** Grid-aware cells (with overlap), one single-reader decode per cell. */
-    private int scanCells(LuminanceSource src, int grid, Map<DecodeHintType, Object> hints, Sink sink) {
+    private int scanCells(LuminanceSource src, int grid, boolean transpose,
+                          Map<DecodeHintType, Object> hints, Sink sink) {
         int n = 0;
         try {
-            for (int[] rc : GridCells.split(src.getWidth(), src.getHeight(), grid, CELL_OVERLAP_PCT)) {
+            int[] rc = GridCells.rowsColsFor(grid);
+            int rows = transpose ? rc[1] : rc[0];
+            int cols = transpose ? rc[0] : rc[1];
+            for (int[] rect : GridCells.splitRC(src.getWidth(), src.getHeight(),
+                    rows, cols, CELL_OVERLAP_PCT)) {
                 if (!src.isCropSupported()) break;
                 LuminanceSource cell;
                 try {
-                    cell = src.crop(rc[0], rc[1], rc[2], rc[3]);
+                    cell = src.crop(rect[0], rect[1], rect[2], rect[3]);
                 } catch (Exception ignore) {
                     continue;
                 }

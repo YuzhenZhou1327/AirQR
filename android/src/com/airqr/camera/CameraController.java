@@ -19,6 +19,11 @@ public final class CameraController {
         void onFrame(byte[] nv21, int width, int height);
     }
 
+    /** Overlay that shows the decoder-visible content rect (framing guide). */
+    public interface GuideOverlay {
+        void setContentRect(float left, float top, float right, float bottom);
+    }
+
     private static final String TAG = "AirQR";
 
     private android.hardware.Camera camera;
@@ -26,6 +31,22 @@ public final class CameraController {
     private final FrameCallback callback;
     private int previewW = 0, previewH = 0;
     private volatile boolean analyzing = true;
+    /** Display rotation for setDisplayOrientation (0/90/180/270), driven by hold. */
+    private int displayOrientation = 90;
+    private GuideOverlay guide;
+    // letterbox params (for tap-to-focus mapping + guide); set in applyLetterbox
+    private float lbScale = 0, lbTx = 0, lbTy = 0;
+    private int lbImgW = 0, lbImgH = 0, lbViewW = 0, lbViewH = 0;
+
+    public void setDisplayOrientation(int degrees) {
+        if (degrees == 0 || degrees == 90 || degrees == 180 || degrees == 270) {
+            displayOrientation = degrees;
+        }
+    }
+
+    public void setGuide(GuideOverlay guide) {
+        this.guide = guide;
+    }
 
     public CameraController(TextureView textureView, FrameCallback callback) {
         this.textureView = textureView;
@@ -72,7 +93,7 @@ public final class CameraController {
         } catch (Exception e) {
             throw new RuntimeException("setPreviewTexture", e);
         }
-        camera.setDisplayOrientation(90); // portrait
+        camera.setDisplayOrientation(displayOrientation); // portrait default 90
         int bufSize = w * h * 3 / 2;
         for (int i = 0; i < 3; i++) {
             camera.addCallbackBuffer(new byte[bufSize]);
@@ -109,23 +130,38 @@ public final class CameraController {
     }
 
     /**
-     * Letterbox: the preview stream arrives already rotated by
-     * setDisplayOrientation(90) — displayed size = ph × pw (portrait).
-     * Scale uniformly to fit the view, centered: no stretch.
+     * Letterbox: the preview stream arrives rotated by setDisplayOrientation —
+     * displayed size = ph × pw for 90/270, pw × ph for 0/180. Scale uniformly
+     * to fit the view, centered: no stretch. Stores params for tap-to-focus
+     * mapping and forwards the content rect to the framing guide.
      */
     private void applyLetterbox() {
         final int pw = previewW, ph = previewH;
+        final int disp = displayOrientation;
         textureView.post(() -> {
             int vw = textureView.getWidth(), vh = textureView.getHeight();
             if (vw == 0 || vh == 0) return;
-            float dispW = ph, dispH = pw; // rotated display size
+            float dispW = (disp == 0 || disp == 180) ? pw : ph;
+            float dispH = (disp == 0 || disp == 180) ? ph : pw;
             float scale = Math.min(vw / dispW, vh / dispH);
+            float tx = (vw - dispW * scale) / 2f, ty = (vh - dispH * scale) / 2f;
             android.util.Log.i(TAG, "letterbox view=" + vw + "x" + vh
-                    + " content=" + dispW + "x" + dispH + " scale=" + scale);
+                    + " content=" + dispW + "x" + dispH + " scale=" + scale
+                    + " disp=" + disp);
             Matrix m = new Matrix();
             m.setScale(scale, scale);
-            m.postTranslate((vw - dispW * scale) / 2f, (vh - dispH * scale) / 2f);
+            m.postTranslate(tx, ty);
             textureView.setTransform(m);
+            lbScale = scale;
+            lbTx = tx;
+            lbTy = ty;
+            lbImgW = (int) dispW;
+            lbImgH = (int) dispH;
+            lbViewW = vw;
+            lbViewH = vh;
+            if (guide != null) {
+                guide.setContentRect(tx, ty, tx + dispW * scale, ty + dispH * scale);
+            }
         });
     }
 
@@ -166,15 +202,37 @@ public final class CameraController {
     }
 
     /**
-     * Maps a view-normalized tap to sensor coords with 90° display rotation:
-     * sensorX = viewY, sensorY = viewW - viewX. Input: (normX,normY) in [0,1]
-     * of the view; returns the sensor-space coordinate in [-1000,1000].
+     * Maps a view-normalized tap to sensor coords ([-1000,1000]) for the
+     * current display orientation.
+     *
+     * Derivation (do NOT "simplify" without re-verifying on device):
+     * view → image via inverse letterbox (clamped), image → buffer by
+     * undoing the display rotation. Increasing setDisplayOrientation rotates
+     * the image visually clockwise, so buffer = image rotated CCW by D/90
+     * quarter-turns. Anchor: at D=90 this yields buffer=(iy,1-ix), which is
+     * exactly the old field-tested formula (bx=viewY, by=1-viewX on a full
+     * view). buffer → sensor is linear (same orientation, origin top-left).
      */
     private android.graphics.Point focusPoint(float normX, float normY) {
-        float sx = normY;                 // sensor x from view y
-        float sy = 1f - normX;            // sensor y from view x
-        return new android.graphics.Point(
-                (int) (sx * 2000 - 1000), (int) (sy * 2000 - 1000));
+        float ix = normX, iy = normY;
+        if (lbViewW > 0 && lbImgW > 0 && lbScale > 0) {
+            ix = (normX * lbViewW - lbTx) / (lbImgW * lbScale);
+            iy = (normY * lbViewH - lbTy) / (lbImgH * lbScale);
+            ix = Math.max(0f, Math.min(1f, ix));
+            iy = Math.max(0f, Math.min(1f, iy));
+        }
+        int turns = (((displayOrientation / 90) % 4) + 4) % 4;
+        float bx = ix, by = iy;
+        for (int i = 0; i < turns; i++) {
+            float nx = by, ny = 1f - bx; // one visual-CCW quarter turn
+            bx = nx;
+            by = ny;
+        }
+        int sx = (int) (bx * 2000 - 1000);
+        int sy = (int) (by * 2000 - 1000);
+        sx = Math.max(-1000, Math.min(1000, sx));
+        sy = Math.max(-1000, Math.min(1000, sy));
+        return new android.graphics.Point(sx, sy);
     }
 
     public void setTorch(boolean on) {
