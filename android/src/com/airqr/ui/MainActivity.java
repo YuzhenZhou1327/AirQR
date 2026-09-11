@@ -412,6 +412,15 @@ public class MainActivity extends Activity implements FountainSession.Listener {
     }
 
     @Override
+    public void onConfigurationChanged(android.content.res.Configuration cfg) {
+        super.onConfigurationChanged(cfg);
+        // Views re-measure themselves (no activity recreation per manifest
+        // configChanges); the camera keeps streaming — just re-fit the
+        // preview transform + guide rect to the new geometry.
+        if (camera != null) camera.refreshLetterbox();
+    }
+
+    @Override
     protected void onPause() {
         super.onPause();
         disableOrientListener();

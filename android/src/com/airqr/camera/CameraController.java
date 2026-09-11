@@ -48,6 +48,12 @@ public final class CameraController {
         this.guide = guide;
     }
 
+    /** Re-fit the preview transform to the current view geometry (e.g. after
+     * activity rotation). Idempotent; also re-forwards the content rect. */
+    public void refreshLetterbox() {
+        if (camera != null) applyLetterbox();
+    }
+
     public CameraController(TextureView textureView, FrameCallback callback) {
         this.textureView = textureView;
         this.callback = callback;
@@ -173,6 +179,11 @@ public final class CameraController {
             camera.release();
             camera = null;
         }
+        // Reset the view transform so no stale orientation geometry can leak
+        // into the next start (half-live/half-black preview class of bugs).
+        try {
+            textureView.setTransform(null);
+        } catch (Exception ignore) { }
     }
 
     /** Tap-to-focus at view-relative (x,y) in [0,1]. */
