@@ -90,6 +90,18 @@ public class MainActivity extends Activity implements FountainSession.Listener {
             android.util.Log.i("AirQR", "auto self-test requested via intent");
             startPanel.postDelayed(this::autoSelfTest, 500);
         }
+        // adb-driven diagnostic: am start ... --ez scan true (enter scanning, no taps)
+        if (getIntent() != null && getIntent().getBooleanExtra("scan", false)) {
+            android.util.Log.i("AirQR", "auto scan requested via intent");
+            startPanel.postDelayed(() -> {
+                if (checkSelfPermission(Manifest.permission.CAMERA)
+                        == PackageManager.PERMISSION_GRANTED) {
+                    enterScanning();
+                } else {
+                    android.util.Log.e("AirQR", "auto scan: camera permission not granted");
+                }
+            }, 500);
+        }
         preview.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture st, int w, int h) {
                 surfaceReady = true;

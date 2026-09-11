@@ -19,6 +19,8 @@ public final class CameraController {
         void onFrame(byte[] nv21, int width, int height);
     }
 
+    private static final String TAG = "AirQR";
+
     private android.hardware.Camera camera;
     private final TextureView textureView;
     private final FrameCallback callback;
@@ -70,21 +72,30 @@ public final class CameraController {
         applyLetterbox();
     }
 
-    /** Picks the preview size with aspect closest to 16:9, area closest to 1280x720. */
+    /** Picks the largest-area 16:9 preview size (sharp preview + more px per
+     * module for decode); falls back to largest area of any aspect. */
     private static android.hardware.Camera.Size pickSize(List<android.hardware.Camera.Size> sizes) {
         android.hardware.Camera.Size best = sizes.get(0);
         double want = 16.0 / 9.0;
-        double bestScore = Double.MAX_VALUE;
+        // pass 1: 16:9 within 2% tolerance, max area wins
+        boolean found = false;
         for (android.hardware.Camera.Size s : sizes) {
             double aspect = (double) s.width / s.height;
-            double aspectScore = Math.abs(aspect - want) * 1000; // aspect dominates
-            double areaScore = Math.abs(Math.log((double)(s.width * s.height) / (1280.0 * 720.0)));
-            double score = aspectScore + areaScore;
-            if (score < bestScore) {
-                bestScore = score;
+            if (Math.abs(aspect - want) / want > 0.02) continue;
+            if (!found || s.width * s.height > best.width * best.height) {
                 best = s;
+                found = true;
             }
         }
+        // pass 2: no 16:9 at all → largest area overall
+        if (!found) {
+            for (android.hardware.Camera.Size s : sizes) {
+                if (s.width * s.height > best.width * best.height) best = s;
+            }
+        }
+        StringBuilder sb = new StringBuilder("preview sizes:");
+        for (android.hardware.Camera.Size s : sizes) sb.append(' ').append(s.width).append('x').append(s.height);
+        android.util.Log.i(TAG, sb + " → pick " + best.width + "x" + best.height);
         return best;
     }
 
@@ -100,6 +111,8 @@ public final class CameraController {
             if (vw == 0 || vh == 0) return;
             float dispW = ph, dispH = pw; // rotated display size
             float scale = Math.min(vw / dispW, vh / dispH);
+            android.util.Log.i(TAG, "letterbox view=" + vw + "x" + vh
+                    + " content=" + dispW + "x" + dispH + " scale=" + scale);
             Matrix m = new Matrix();
             m.setScale(scale, scale);
             m.postTranslate((vw - dispW * scale) / 2f, (vh - dispH * scale) / 2f);

@@ -10,7 +10,7 @@ root = Path(__file__).resolve().parents[2]
 cases = json.loads((root / "spec" / "vectors" / "cases.json").read_text())["cases"]
 out = root / "android" / "test" / "vectors.tsv"
 cols = ["case", "file_hex", "blen", "k", "seed", "tid", "block_0_hex",
-        "block_c0_hex", "manifest_json", "all_blocks_hex"]
+        "block_c0_hex", "manifest_json", "all_blocks_hex", "sel_vectors"]
 with open(out, "w", encoding="utf-8", newline="\n") as f:
     f.write("\t".join(cols) + "\n")
     for c in cases:

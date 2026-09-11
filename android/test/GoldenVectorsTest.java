@@ -7,6 +7,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 
@@ -20,7 +21,8 @@ import static org.junit.jupiter.api.Assertions.*;
 public class GoldenVectorsTest {
 
     private record Vec(String name, byte[] file, int blen, int k, long seed, long tid,
-                       String block0, String blockC0, String manifest, byte[] allBlocks) {}
+                       String block0, String blockC0, String manifest, byte[] allBlocks,
+                       String selVectors) {}
 
     private static List<Vec> load() throws Exception {
         for (String p : new String[]{"test/vectors.tsv", "android/test/vectors.tsv", "vectors.tsv"}) {
@@ -33,7 +35,7 @@ public class GoldenVectorsTest {
                     out.add(new Vec(c[0], HexFormat.of().parseHex(c[1]),
                             Integer.parseInt(c[2]), Integer.parseInt(c[3]),
                             Long.parseLong(c[4]), Long.parseLong(c[5]),
-                            c[6], c[7], c[8], HexFormat.of().parseHex(c[9])));
+                            c[6], c[7], c[8], HexFormat.of().parseHex(c[9]), c[10]));
                 }
                 return out;
             }
@@ -99,5 +101,91 @@ public class GoldenVectorsTest {
     private static long u32le(byte[] b, int off) {
         return (b[off] & 0xFFL) | ((b[off + 1] & 0xFFL) << 8)
                 | ((b[off + 2] & 0xFFL) << 16) | ((b[off + 3] & 0xFFL) << 24);
+    }
+
+    /**
+     * Locks the seed-&gt;selection mapping bit-exact against Go selectionsSpec.
+     * Regression net for the 1L&lt;&lt;64==1L collapse (every slot degenerated
+     * to one constant selection set while this test still passed).
+     */
+    @Test
+    public void selectionsMatchGo() throws Exception {
+        for (Vec v : load()) {
+            String seen = null;
+            boolean varied = false;
+            for (String part : v.selVectors().split(";")) {
+                String[] f = part.split(":", -1);
+                long seed = Long.parseLong(f[0]);
+                boolean[] sel = LtDecoder.selections(seed, v.k());
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < sel.length; i++) {
+                    if (sel[i]) {
+                        if (sb.length() > 0) sb.append(',');
+                        sb.append(i);
+                    }
+                }
+                assertEquals(f[2], sb.toString(),
+                        v.name() + ": sel mismatch for seed " + seed);
+                if (seen == null) seen = sb.toString();
+                else if (!seen.equals(sb.toString())) varied = true;
+            }
+            if (v.k() > 1) {
+                assertTrue(varied, v.name() + ": selections constant across seeds?!");
+            }
+            System.out.println(v.name() + ": selections OK (" + v.selVectors() + ")");
+        }
+    }
+
+    /**
+     * Feeds LT blocks (id &gt;= K) BEFORE source blocks — the arrival order a
+     * lossy phone scan produces — and asserts byte-exact reassembly.
+     * The old sequential feed broke out on sources alone and never ran addLt.
+     */
+    @Test
+    public void ltBlocksFirstDecodeByteExact() throws Exception {
+        for (Vec v : load()) {
+            LtDecoder dec = new LtDecoder(v.k(), v.blen(), v.file().length);
+            List<byte[]> lts = new ArrayList<>();
+            List<byte[]> srcs = new ArrayList<>();
+            int off = 0;
+            while (off < v.allBlocks().length) {
+                int dataLen = Wire.blockDataLen(v.blen(), u32le(v.allBlocks(), off + 10),
+                        v.k(), v.file().length);
+                int total = off + Wire.HEADER_LEN + dataLen;
+                byte[] raw = Arrays.copyOfRange(v.allBlocks(), off, total);
+                off = total;
+                if (u32le(raw, 10) < v.k()) srcs.add(raw);
+                else lts.add(raw);
+            }
+            assertFalse(lts.isEmpty(), v.name() + ": fixture has no LT blocks");
+            for (byte[] raw : lts) {
+                Wire.Block b = Wire.parseBlock(raw, 0, raw.length);
+                feedBlock(dec, v, b);
+                if (dec.solved()) break;
+            }
+            if (!dec.solved()) {
+                for (byte[] raw : srcs) {
+                    Wire.Block b = Wire.parseBlock(raw, 0, raw.length);
+                    feedBlock(dec, v, b);
+                    if (dec.solved()) break;
+                }
+            }
+            assertTrue(dec.solved(), v.name() + ": not solved LT-first");
+            assertArrayEquals(v.file(), dec.file(), v.name() + ": bytes differ LT-first");
+            System.out.println(v.name() + ": LT-first decode OK");
+        }
+    }
+
+    private static void feedBlock(LtDecoder dec, Vec v, Wire.Block b) {
+        if (b.id < v.k()) {
+            byte[] payload = new byte[b.data.length - 4];
+            System.arraycopy(b.data, 4, payload, 0, payload.length);
+            dec.addSource((int) b.id, payload);
+        } else {
+            long seed = u32le(b.data, 0);
+            byte[] payload = new byte[b.data.length - 4];
+            System.arraycopy(b.data, 4, payload, 0, payload.length);
+            dec.addLt(seed, payload);
+        }
     }
 }

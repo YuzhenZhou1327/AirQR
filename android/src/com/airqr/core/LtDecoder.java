@@ -91,9 +91,13 @@ public final class LtDecoder {
         eqs.add(eq);
     }
 
-    /** Degree distribution v2 + selection stream (spec §4.1). */
-    static boolean[] selections(long seed, int k) {
-        SplitMix64 p = new SplitMix64(Long.remainderUnsigned(seed * DEGREE_MIX, 1L << 64) ^ (k & 0xFFFFFFFFL));
+    /** Degree distribution v2 + selection stream (spec §4.1). Bit-exact with
+     * Go selectionsSpec: stream = splitmix64(uint64(seed)*degreeMix ^ uint64(k)).
+     * Java long arithmetic already wraps mod 2^64 — NO masking (the old
+     * remainderUnsigned(x, 1L<<64) was always 0 since 1L<<64==1L, collapsing
+     * every slot to one constant selection set). */
+    static public boolean[] selections(long seed, int k) {
+        SplitMix64 p = new SplitMix64(seed * DEGREE_MIX ^ (k & 0xFFFFFFFFL));
         long u = p.nextMod(10000);
         int deg;
         if (u < 200) deg = 1;

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -57,6 +58,9 @@ func TestGenerateGoldenVectors(t *testing.T) {
 		BlockC0Hex string `json:"block_c0_hex"`
 		Manifest   string `json:"manifest_json"`
 		AllBlocks  string `json:"all_blocks_hex"` // concatenation of PackBlock(id) for id<cycle
+		// SelVectors locks the seed->selection mapping directly (regression net
+		// for the 1L<<64==1L collapse): "seed:deg:idx,idx,..." entries joined by ";".
+		SelVectors string `json:"sel_vectors"`
 	}
 	gen := func(name string, size, blen int, seed, tid uint32, data []byte) vecCase {
 		enc, err := NewEncoder(data, blen, seed)
@@ -71,12 +75,27 @@ func TestGenerateGoldenVectors(t *testing.T) {
 		}
 		man := `{"fmt":"airqr1","tid":` + u32s(tid) + `,"name":"vectors.bin","size":` + itoa(len(data)) +
 			`,"blen":` + itoa(blen) + `,"k":` + itoa(enc.K()) + `,"zstd":0}`
+		// selection vectors: fixed seeds x this case's K (pure function of the
+		// reference implementation; the JVM side must reproduce them bit-exact).
+		selSeeds := []uint32{1, 2, 12345, 777}
+		selParts := make([]string, 0, len(selSeeds))
+		for _, s := range selSeeds {
+			deg, sel := selectionsSpec(s, enc.K())
+			idxs := make([]string, 0)
+			for i, b := range sel {
+				if b {
+					idxs = append(idxs, itoa(i))
+				}
+			}
+			selParts = append(selParts, u32s(s)+":"+itoa(deg)+":"+strings.Join(idxs, ","))
+		}
 		return vecCase{
 			Case: name, FileHex: hexStr(data), Blen: blen, K: enc.K(), Seed: seed, TID: tid,
 			Block0Hex:  hexStr(enc.BlockData(0)),
 			BlockC0Hex: hexStr(c0),
 			Manifest:   man,
 			AllBlocks:  hexStr(allPayload),
+			SelVectors: strings.Join(selParts, ";"),
 		}
 	}
 	cases := []vecCase{
