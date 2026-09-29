@@ -246,6 +246,55 @@ public final class RotationSim {
             check(ok, "T5 AOSP/bucket/transpose table (mounts 90/270 x 4 holds)");
         }
 
+        // T6: TextureView matrix maps buffer corners onto the letterbox rect
+        // (v1.16 "歪" fix — setTransform runs AFTER the stretch-to-view).
+        {
+            boolean ok = true;
+            for (int D : new int[]{0, 90, 180, 270}) {
+                for (int[] vw : views) {
+                    double[] lb = letterbox(vw[0], vw[1], BW, BH, D);
+                    double s = lb[0], tx = lb[1], ty = lb[2], dispW = lb[3], dispH = lb[4];
+                    double sx = s * BW / vw[0], sy = s * BH / vw[1];
+                    // matrix on stretched point (X,Y): buffer = (X*BW/vw, Y*BH/vh)
+                    // verify each buffer corner lands on the letterbox rect
+                    double[][] bufs = {{0, 0}, {BW, 0}, {0, BH}, {BW, BH}};
+                    for (double[] b : bufs) {
+                        double X = b[0] * vw[0] / BW, Y = b[1] * vw[1] / BH;
+                        double vx, vy;
+                        switch (D) {
+                            case 90:
+                                vx = -sy * Y + s * BH + tx;
+                                vy = sx * X + ty;
+                                break;
+                            case 180:
+                                vx = -sx * X + s * BW + tx;
+                                vy = -sy * Y + s * BH + ty;
+                                break;
+                            case 270:
+                                vx = sy * Y + tx;
+                                vy = -sx * X + s * BW + ty;
+                                break;
+                            default:
+                                vx = sx * X + tx;
+                                vy = sy * Y + ty;
+                        }
+                        // must lie on the border of the letterbox rect
+                        boolean onL = Math.abs(vx - tx) < 1e-6 || Math.abs(vx - (tx + dispW * s)) < 1e-6
+                                || Math.abs(vy - ty) < 1e-6 || Math.abs(vy - (ty + dispH * s)) < 1e-6;
+                        boolean inX = vx >= tx - 1e-6 && vx <= tx + dispW * s + 1e-6;
+                        boolean inY = vy >= ty - 1e-6 && vy <= ty + dispH * s + 1e-6;
+                        if (!onL || !inX || !inY) {
+                            ok = false;
+                            System.out.println("  matrix corner off: D=" + D + " view=" + vw[0] + "x" + vw[1]
+                                    + " buf=(" + b[0] + "," + b[1] + ") -> (" + vx + "," + vy + ")"
+                                    + " rect=(" + tx + "," + ty + ")+(" + (dispW * s) + "x" + (dispH * s) + ")");
+                        }
+                    }
+                }
+            }
+            check(ok, "T6 TextureView matrix corners hit letterbox rect (4D x 2 views)");
+        }
+
         System.out.println(failures == 0 ? "SIM ALL PASS" : "SIM FAILURES=" + failures);
         if (failures > 0) System.exit(1);
     }

@@ -5,12 +5,11 @@ import android.util.Log;
 import com.google.zxing.BinaryBitmap;
 import com.google.zxing.DecodeHintType;
 import com.google.zxing.LuminanceSource;
-import com.google.zxing.MultiFormatReader;
 import com.google.zxing.PlanarYUVLuminanceSource;
 import com.google.zxing.Result;
 import com.google.zxing.common.GlobalHistogramBinarizer;
 import com.google.zxing.common.HybridBinarizer;
-import com.google.zxing.multi.GenericMultipleBarcodeReader;
+import com.google.zxing.multi.qrcode.QRCodeMultiReader;
 import com.google.zxing.qrcode.QRCodeReader;
 
 import java.nio.charset.StandardCharsets;
@@ -38,11 +37,17 @@ import java.util.Set;
  *         TRY_HARDER only narrows the finder row-skip, useless for big codes)
  *  - Sharpness gate: frames with subsampled-Y variance below VAR_FLOOR are
  *    skipped before any decode (defocus/motion/covered lens).
+ *
+ * v1.16 speed (landscape parity):
+ *  - Cell decode runs on a small worker pool (per-thread QRCodeReader) so
+ *    6/8-cell grids are not strictly serial — this is the path that must
+ *    keep pace with the landscape pixel advantage.
+ *  - Early-exit once the frame's cell budget (grid + manifest slot) is filled.
+ *  - Full-frame multi readers are reused; no per-call GenericMultipleBarcodeReader.
  */
 public final class QrGridAnalyzer {
     private static final String TAG = "AirQR";
-    private final MultiFormatReader reader = new MultiFormatReader();
-    private final QRCodeReader single = new QRCodeReader();
+    private final QRCodeMultiReader qrMulti = new QRCodeMultiReader();
     private final Map<DecodeHintType, Object> hintsTH = new EnumMap<>(DecodeHintType.class);
     private final Map<DecodeHintType, Object> hintsFast = new EnumMap<>(DecodeHintType.class);
     private long lastLog = 0;
@@ -55,6 +60,15 @@ public final class QrGridAnalyzer {
     public volatile int rung = 0;
     private volatile boolean busy = false; // drop frames while decoding
     private int failStreak = 0;
+    /** Worker pool for cell-parallel decode; 3 is enough for 2x4 grids. */
+    private final java.util.concurrent.ExecutorService cellPool =
+            java.util.concurrent.Executors.newFixedThreadPool(3, r -> {
+                Thread t = new Thread(r, "airqr-cell");
+                t.setDaemon(true);
+                return t;
+            });
+    private final ThreadLocal<QRCodeReader> cellReaders =
+            ThreadLocal.withInitial(QRCodeReader::new);
 
     /** Subsampled-Y variance below this → skip frame (bench: clean ~12000,
      * blurred ~10300, 25%-dark ~728 and still decodable, flat gray = 0). */
@@ -150,19 +164,22 @@ public final class QrGridAnalyzer {
             if (payload == null || payload.length == 0) return;
             long key = (((long) java.util.Arrays.hashCode(payload)) << 32)
                     | (payload.length & 0xFFFFFFFFL);
-            if (seen.add(key)) sink.onPayload(payload);
+            synchronized (seen) {
+                if (seen.add(key)) sink.onPayload(payload);
+            }
         };
         long t0 = System.nanoTime();
         int n;
         String stage;
         int r = (rung == 0 && sub == null) ? 1 : rung; // R0 needs subsample
+        int budget = cellBudget(grid); // max codes expected this frame
         switch (r) {
             case 0:
-                n = scanCells(sub, grid, transpose, hintsFast, dedup);
+                n = scanCells(sub, grid, transpose, hintsFast, dedup, budget);
                 stage = "r0/cell-sub";
                 break;
             case 1:
-                n = scanCells(full, grid, transpose, hintsFast, dedup);
+                n = scanCells(full, grid, transpose, hintsFast, dedup, budget);
                 stage = "r1/cell-full";
                 break;
             case 2:
@@ -196,39 +213,66 @@ public final class QrGridAnalyzer {
         return seen.size();
     }
 
-    /** Grid-aware cells (with overlap), one single-reader decode per cell. */
+    /** Codes we expect in one frame: grid blocks + optional manifest cell. */
+    private static int cellBudget(int grid) {
+        int[] rc = GridCells.rowsColsFor(grid);
+        return rc[0] * rc[1] + 1;
+    }
+
+    /**
+     * Grid-aware cells (with overlap), one single-reader decode per cell.
+     * Cells run on a worker pool so multi-cell grids stay fast in landscape
+     * (where codes are larger and the pixel budget is spent on real QR area).
+     */
     private int scanCells(LuminanceSource src, int grid, boolean transpose,
-                          Map<DecodeHintType, Object> hints, Sink sink) {
-        int n = 0;
-        try {
-            int[] rc = GridCells.rowsColsFor(grid);
-            int rows = transpose ? rc[1] : rc[0];
-            int cols = transpose ? rc[0] : rc[1];
-            for (int[] rect : GridCells.splitRC(src.getWidth(), src.getHeight(),
-                    rows, cols, CELL_OVERLAP_PCT)) {
-                if (!src.isCropSupported()) break;
+                          Map<DecodeHintType, Object> hints, Sink sink, int budget) {
+        if (src == null || !src.isCropSupported()) return 0;
+        int[] rc = GridCells.rowsColsFor(grid);
+        int rows = transpose ? rc[1] : rc[0];
+        int cols = transpose ? rc[0] : rc[1];
+        int[][] rects = GridCells.splitRC(src.getWidth(), src.getHeight(),
+                rows, cols, CELL_OVERLAP_PCT);
+        java.util.concurrent.atomic.AtomicInteger found =
+                new java.util.concurrent.atomic.AtomicInteger();
+        java.util.List<byte[]> hits = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        java.util.List<java.util.concurrent.Future<?>> jobs = new java.util.ArrayList<>(rects.length);
+        for (int[] rect : rects) {
+            if (found.get() >= budget) break;
+            jobs.add(cellPool.submit(() -> {
+                if (found.get() >= budget) return;
                 LuminanceSource cell;
                 try {
                     cell = src.crop(rect[0], rect[1], rect[2], rect[3]);
                 } catch (Exception ignore) {
-                    continue;
+                    return;
                 }
+                QRCodeReader r = cellReaders.get();
                 try {
-                    Result res = single.decode(
+                    Result res = r.decode(
                             new BinaryBitmap(new GlobalHistogramBinarizer(cell)), hints);
                     byte[] raw = payloadBytes(res);
                     if (raw != null) {
-                        sink.onPayload(raw);
-                        n++;
+                        hits.add(raw);
+                        found.incrementAndGet();
                     }
                 } catch (Exception ignore) {
                     // no code in this cell
                 } finally {
-                    single.reset();
+                    r.reset();
                 }
+            }));
+        }
+        for (java.util.concurrent.Future<?> f : jobs) {
+            try {
+                f.get();
+            } catch (Exception ignore) {
+                // worker cancelled/failed — other cells still count
             }
-        } finally {
-            reader.reset();
+        }
+        int n = 0;
+        for (byte[] raw : hits) {
+            sink.onPayload(raw);
+            n++;
         }
         return n;
     }
@@ -239,8 +283,7 @@ public final class QrGridAnalyzer {
         try {
             BinaryBitmap bmp = new BinaryBitmap(hybrid
                     ? new HybridBinarizer(src) : new GlobalHistogramBinarizer(src));
-            GenericMultipleBarcodeReader multi = new GenericMultipleBarcodeReader(reader);
-            Result[] results = multi.decodeMultiple(bmp, hints);
+            Result[] results = qrMulti.decodeMultiple(bmp, hints);
             if (results != null) {
                 for (Result res : results) {
                     byte[] raw = payloadBytes(res);
@@ -253,7 +296,7 @@ public final class QrGridAnalyzer {
         } catch (Exception ignore) {
             // no codes in this pass
         } finally {
-            reader.reset();
+            qrMulti.reset();
         }
         return n;
     }

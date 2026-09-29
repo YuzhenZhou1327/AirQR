@@ -1,0 +1,705 @@
+<!-- AI生成 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0D1117">
+<title>AirQR 优化演示</title>
+<style>
+  :root {
+    --bg: #0D1117;
+    --panel: #161B22;
+    --panel2: #1C2330;
+    --ink: #E6EDF3;
+    --muted: #8B949E;
+    --line: #30363D;
+    --accent: #4CAF50;
+    --accent-dim: #2E7D32;
+    --amber: #FFB300;
+    --danger: #F85149;
+    --blue: #58A6FF;
+    --mono: "SF Mono", "Cascadia Code", Consolas, "Roboto Mono", monospace;
+    --sans: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100%;
+  }
+  body { padding: 0 0 env(safe-area-inset-bottom); }
+  .app {
+    max-width: 480px; margin: 0 auto;
+    padding: 16px 16px 32px;
+    min-height: 100vh;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 0 4px;
+  }
+  .logo {
+    width: 40px; height: 40px; border-radius: 10px;
+    background: linear-gradient(145deg, var(--accent-dim), var(--accent));
+    display: grid; place-items: center;
+    font-weight: 700; font-size: 13px; color: #fff;
+    letter-spacing: -0.5px;
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 18px; font-weight: 650; letter-spacing: -0.2px; }
+  header .sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+  .tabs {
+    display: flex; gap: 4px; background: var(--panel);
+    padding: 4px; border-radius: 12px; border: 1px solid var(--line);
+  }
+  .tab {
+    flex: 1; text-align: center; padding: 10px 6px;
+    border-radius: 9px; border: 0; background: transparent;
+    color: var(--muted); font-size: 13px; font-weight: 600;
+    cursor: pointer; font-family: inherit;
+    transition: background .15s, color .15s;
+  }
+  .tab.active { background: var(--accent); color: #fff; }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px;
+    display: none; flex-direction: column; gap: 14px;
+  }
+  .panel.active { display: flex; }
+
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+  .value { font-family: var(--mono); font-size: 13px; color: var(--ink); }
+  .value.big { font-size: 22px; font-weight: 650; letter-spacing: -0.3px; }
+  .value.accent { color: var(--accent); }
+  .value.amber { color: var(--amber); }
+
+  .seg {
+    display: flex; gap: 4px; background: var(--panel2);
+    padding: 3px; border-radius: 10px;
+  }
+  .seg button {
+    flex: 1; padding: 8px 4px; border: 0; border-radius: 8px;
+    background: transparent; color: var(--muted);
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }
+  .seg button.on { background: var(--line); color: var(--ink); }
+
+  .bar-wrap {
+    height: 12px; background: var(--panel2); border-radius: 99px;
+    overflow: hidden; border: 1px solid var(--line);
+  }
+  .bar {
+    height: 100%; width: 0%; border-radius: 99px;
+    background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+    transition: width .12s linear;
+  }
+  .bar.done { background: var(--accent); }
+
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; padding: 14px 16px; border: 0; border-radius: 12px;
+    font-size: 15px; font-weight: 650; font-family: inherit;
+    cursor: pointer; color: #fff;
+    background: var(--accent);
+    transition: transform .08s, opacity .15s;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn.ghost {
+    background: var(--panel2); color: var(--ink);
+    border: 1px solid var(--line);
+  }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+  .stats {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+  }
+  .stat {
+    background: var(--panel2); border-radius: 10px; padding: 10px 8px;
+    text-align: center; border: 1px solid var(--line);
+  }
+  .stat .n { font-family: var(--mono); font-size: 15px; font-weight: 650; }
+  .stat .t { font-size: 10px; color: var(--muted); margin-top: 2px; text-transform: uppercase; letter-spacing: .04em; }
+
+  .compare {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+  .compare .side {
+    background: var(--panel2); border-radius: 12px; padding: 12px;
+    border: 1px solid var(--line); text-align: center;
+  }
+  .compare .side .tag {
+    font-size: 11px; font-weight: 700; letter-spacing: .05em;
+    text-transform: uppercase; margin-bottom: 8px;
+  }
+  .compare .side.ok .tag { color: var(--accent); }
+  .compare .side.bad .tag { color: var(--danger); }
+  .compare .side .ms {
+    font-family: var(--mono); font-size: 28px; font-weight: 700;
+    letter-spacing: -1px;
+  }
+  .compare .side .hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  /* Phone frame for rotation demo */
+  .phone-stage {
+    display: flex; justify-content: center; padding: 8px 0;
+  }
+  .phone {
+    width: 168px; height: 300px;
+    background: #000; border-radius: 22px;
+    border: 3px solid var(--line);
+    position: relative; overflow: hidden;
+    transition: width .35s ease, height .35s ease, border-radius .35s;
+    box-shadow: 0 12px 40px rgba(0,0,0,.45);
+  }
+  .phone.landscape {
+    width: 300px; height: 168px;
+    border-radius: 18px;
+  }
+  .cam {
+    position: absolute; inset: 8px;
+    background:
+      linear-gradient(180deg, #1a2332 0%, #0f1720 100%);
+    border-radius: 8px;
+    overflow: hidden;
+    display: grid; place-items: center;
+  }
+  .cam-inner {
+    width: 88%; aspect-ratio: 16/9;
+    background: #fff; border-radius: 4px;
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 6px; padding: 8px;
+    transition: transform .35s ease, width .35s, height .35s;
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  .phone.landscape .cam-inner {
+    width: 92%;
+    /* landscape world: codes fill more of the 16:9 frame */
+  }
+  .phone.bug .cam-inner {
+    /* old matrix: shrinks + offsets — “一小格 / 歪” */
+    transform: scale(0.72) translate(8px, 18px) rotate(2deg);
+  }
+  .phone.fixed .cam-inner {
+    transform: none;
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  .qr-cell {
+    background: #fff;
+    border: 1.5px solid #111;
+    border-radius: 2px;
+    display: grid; place-items: center;
+  }
+  .qr-cell .finder {
+    width: 28%; aspect-ratio: 1;
+    border: 2px solid #111;
+    border-radius: 2px;
+    position: relative;
+  }
+  .qr-cell .finder::after {
+    content: ""; position: absolute; inset: 22%;
+    background: #111; border-radius: 1px;
+  }
+  .guide {
+    position: absolute; inset: 12% 10%;
+    border: 2px dashed var(--accent);
+    border-radius: 10px;
+    pointer-events: none;
+    opacity: .85;
+    transition: inset .35s;
+  }
+  .phone.landscape .guide { inset: 8% 4%; }
+  .phone.bug .guide {
+    /* old guide stayed portrait-sized */
+    inset: 18% 28%;
+  }
+
+  .note {
+    font-size: 12px; color: var(--muted); line-height: 1.55;
+  }
+  .note strong { color: var(--ink); font-weight: 650; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 99px;
+    font-size: 11px; font-weight: 650;
+    background: rgba(76,175,80,.15); color: var(--accent);
+  }
+  .pill.warn { background: rgba(248,81,73,.15); color: var(--danger); }
+  .pill.blue { background: rgba(88,166,255,.15); color: var(--blue); }
+
+  .chart {
+    width: 100%; height: 120px;
+    background: var(--panel2); border-radius: 10px;
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .chart svg { width: 100%; height: 100%; display: block; }
+
+  .kv {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .kv .item {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 8px 10px; background: var(--panel2);
+    border-radius: 8px; border: 1px solid var(--line);
+  }
+  .kv .k { font-size: 12px; color: var(--muted); }
+  .kv .v { font-family: var(--mono); font-size: 13px; }
+
+  footer {
+    text-align: center; padding: 8px 0 4px;
+    font-size: 11px; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<p data-aigc-mark="1" style="margin:0 0 8px;font-size:10px;line-height:1.3;color:#6b6560;font-weight:400;">AI生成</p>
+
+<div class="app">
+  <header>
+    <div class="logo">AQ</div>
+    <div>
+      <h1>AirQR 优化演示</h1>
+      <div class="sub">Linux 渲染加速 · 手机横屏解码</div>
+    </div>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-tab="gen" role="tab">生成进度</button>
+    <button class="tab" data-tab="rot" role="tab">横屏旋转</button>
+    <button class="tab" data-tab="dec" role="tab">解码速度</button>
+  </div>
+
+  <!-- ===== Tab 1: QR generation progress ===== -->
+  <section class="panel active" id="panel-gen">
+    <div class="row">
+      <div class="label">文件大小</div>
+      <div class="seg" id="sizeSeg">
+        <button data-kb="256">256KB</button>
+        <button data-kb="512" class="on">512KB</button>
+        <button data-kb="2048">2MB</button>
+        <button data-kb="8192">8MB</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <div class="label">渲染进度</div>
+        <div class="value big accent" id="pctText">0%</div>
+      </div>
+      <div style="text-align:right">
+        <div class="label">预估剩余</div>
+        <div class="value big amber" id="etaText">--:--</div>
+      </div>
+    </div>
+
+    <div class="bar-wrap"><div class="bar" id="genBar"></div></div>
+
+    <div class="stats">
+      <div class="stat"><div class="n" id="framesText">0/0</div><div class="t">帧</div></div>
+      <div class="stat"><div class="n" id="rateText">0</div><div class="t">帧/秒</div></div>
+      <div class="stat"><div class="n" id="elapsedText">0:00</div><div class="t">已用</div></div>
+    </div>
+
+    <div class="kv" id="genMeta">
+      <div class="item"><span class="k">分辨率</span><span class="v">3840×2160</span></div>
+      <div class="item"><span class="k">网格</span><span class="v">4 码/屏</span></div>
+      <div class="item"><span class="k">K / cycle</span><span class="v" id="kMeta">177 / 310</span></div>
+      <div class="item"><span class="k">优化前 / 后</span><span class="v" id="speedMeta">~100s → ~10s</span></div>
+    </div>
+
+    <button class="btn" id="genBtn">开始生成</button>
+    <button class="btn ghost" id="genReset">重置</button>
+
+    <div class="chart" id="genChart"></div>
+
+    <div class="note">
+      <span class="pill">v1.16</span>
+      Linux 端改为<strong>并行合成 + draw.Draw 批量像素写入 + BestSpeed PNG</strong>。
+      旧路径逐像素 <code>Set()</code> 在 4K 上约 300ms/帧；现在约 20–30ms/帧。
+      进度条按已完成帧数线性外推 ETA。
+    </div>
+  </section>
+
+  <!-- ===== Tab 2: Landscape rotation ===== -->
+  <section class="panel" id="panel-rot">
+    <div class="row">
+      <div class="label">持握方向</div>
+      <div class="seg" id="holdSeg">
+        <button data-hold="portrait" class="on">竖持</button>
+        <button data-hold="landscape">横持</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="label">矩阵版本</div>
+      <div class="seg" id="fixSeg">
+        <button data-fix="bug">旧 · 会歪</button>
+        <button data-fix="fixed" class="on">新 · 已修</button>
+      </div>
+    </div>
+
+    <div class="phone-stage">
+      <div class="phone fixed" id="phone">
+        <div class="cam">
+          <div class="cam-inner" id="camInner">
+            <div class="qr-cell"><div class="finder"></div></div>
+            <div class="qr-cell"><div class="finder"></div></div>
+            <div class="qr-cell"><div class="finder"></div></div>
+            <div class="qr-cell"><div class="finder"></div></div>
+          </div>
+          <div class="guide" id="guide"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="n" id="dispW">1080</div><div class="t">内容宽</div></div>
+      <div class="stat"><div class="n" id="dispH">1920</div><div class="t">内容高</div></div>
+      <div class="stat"><div class="n accent" id="scaleTxt">0.75</div><div class="t">scale</div></div>
+    </div>
+
+    <div class="kv">
+      <div class="item"><span class="k">displayOrientation</span><span class="v" id="dispOri">90°</span></div>
+      <div class="item"><span class="k">TextureView 矩阵</span><span class="v" id="matKind">旋转 + letterbox</span></div>
+      <div class="item"><span class="k">grid 转置</span><span class="v" id="transposeTxt">是（竖持）</span></div>
+    </div>
+
+    <div class="note" id="rotNote">
+      <span class="pill">根因</span>
+      <strong>TextureView.setTransform 作用在“已铺满视图”的纹理上</strong>。
+      旧矩阵 <code>setScale(s,s)+translate</code> 会把已经填满的预览再缩小 s 倍并偏移
+      —— 画面上只剩一小格且发歪。v1.16 改为 <code>setDisplayOrientation(0)</code>
+      并用矩阵完整承担「旋转 + letterbox」，引导框与对焦映射同步。
+    </div>
+  </section>
+
+  <!-- ===== Tab 3: Decode speed ===== -->
+  <section class="panel" id="panel-dec">
+    <div class="row">
+      <div class="label">持握</div>
+      <div class="seg" id="decHoldSeg">
+        <button data-h="P">竖持 P</button>
+        <button data-h="L" class="on">横持 L</button>
+      </div>
+    </div>
+
+    <div class="compare">
+      <div class="side ok" id="sideNow">
+        <div class="tag">v1.16 并行 cell</div>
+        <div class="ms" id="msNow">4.2</div>
+        <div class="hint">ms / 帧 · R0–R1</div>
+      </div>
+      <div class="side bad" id="sideOld">
+        <div class="tag">v1.15 串行</div>
+        <div class="ms" id="msOld">11.8</div>
+        <div class="hint">ms / 帧 · 易跌 R2–R4</div>
+      </div>
+    </div>
+
+    <div class="label">解码梯命中率（模拟）</div>
+    <div class="chart" id="ladderChart"></div>
+
+    <div class="kv">
+      <div class="item"><span class="k">cell worker</span><span class="v">3 threads</span></div>
+      <div class="item"><span class="k">早退</span><span class="v">budget = grid + 1</span></div>
+      <div class="item"><span class="k">横持像素红利</span><span class="v" id="pixBonus">~3× 有效 QR 面积</span></div>
+      <div class="item"><span class="k">旋转对齐</span><span class="v" id="alignTxt">矩阵修复后 cell 不再切码</span></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="n accent" id="thrText">48</div><div class="t">payload/s</div></div>
+      <div class="stat"><div class="n" id="r0Text">86%</div><div class="t">R0 命中</div></div>
+      <div class="stat"><div class="n amber" id="dropText">4%</div><div class="t">丢帧率</div></div>
+    </div>
+
+    <div class="note">
+      <span class="pill blue">速度</span>
+      横持时码更大、cell 对齐正确后，解码梯稳定停在 R0/R1（半采样 / 全分辨率 cell）。
+      旧版横持易因预览歪斜切码 → 连续空帧把 rung 推到 R2–R4 全帧 TRY_HARDER，
+      看起来“横屏比竖屏慢”。对齐修复 + cell 并行后横持吞吐应<strong>不低于竖持</strong>。
+    </div>
+  </section>
+
+  <footer>AirQR · 气隙光学传输 · v1.16 优化演示</footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- tabs ----------
+  const tabs = document.querySelectorAll(".tab");
+  const panels = {
+    gen: document.getElementById("panel-gen"),
+    rot: document.getElementById("panel-rot"),
+    dec: document.getElementById("panel-dec"),
+  };
+  tabs.forEach((t) => {
+    t.addEventListener("click", () => {
+      tabs.forEach((x) => x.classList.remove("active"));
+      t.classList.add("active");
+      Object.values(panels).forEach((p) => p.classList.remove("active"));
+      panels[t.dataset.tab].classList.add("active");
+      if (t.dataset.tab === "rot") syncRot();
+      if (t.dataset.tab === "dec") drawLadder();
+    });
+  });
+
+  // ---------- helpers ----------
+  function fmtDur(sec) {
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    sec = Math.round(sec);
+    if (sec < 60) return "0:" + String(sec).padStart(2, "0");
+    const m = Math.floor(sec / 60), s = sec % 60;
+    return m + ":" + String(s).padStart(2, "0");
+  }
+
+  // ---------- Tab 1: generation progress ----------
+  // Timing model measured from the real binary:
+  //   before: ~313 ms/frame @4K   after: ~25 ms/frame @4K
+  //   frames = ceil(cycle/grid), cycle = ceil(1.75*K), K = ceil(size/2900)
+  const sizeSeg = document.getElementById("sizeSeg");
+  let fileKB = 512;
+  let genTimer = null;
+  let genState = null;
+
+  function calcFrames(kb) {
+    const size = kb * 1024;
+    const blen = 2900;
+    const k = Math.ceil(size / blen);
+    const cycle = Math.max(32, Math.ceil(1.75 * k));
+    const frames = Math.ceil(cycle / 4); // grid=4
+    return { k, cycle, frames };
+  }
+
+  function renderGenChart(history) {
+    const el = document.getElementById("genChart");
+    const w = 100, h = 100;
+    const n = Math.max(history.length, 2);
+    const pts = history.length
+      ? history.map((v, i) => [(i / (n - 1)) * w, h - v * h]).join(" ")
+      : "";
+    el.innerHTML =
+      '<svg viewBox="0 0 100 100" preserveAspectRatio="none">' +
+      '<line x1="0" y1="50" x2="100" y2="50" stroke="#30363D" stroke-width="0.4"/>' +
+      (pts
+        ? '<polyline fill="none" stroke="#4CAF50" stroke-width="1.6" points="' + pts + '"/>'
+        : '<text x="50" y="55" fill="#8B949E" font-size="6" text-anchor="middle">帧完成率</text>') +
+      "</svg>";
+  }
+
+  function updateGenUI() {
+    const st = genState;
+    const pct = st.total ? st.done / st.total : 0;
+    document.getElementById("pctText").textContent = Math.round(pct * 100) + "%";
+    document.getElementById("genBar").style.width = pct * 100 + "%";
+    document.getElementById("framesText").textContent = st.done + "/" + st.total;
+    const rate = st.elapsed > 0 ? st.done / (st.elapsed / 1000) : 0;
+    document.getElementById("rateText").textContent = rate.toFixed(1);
+    document.getElementById("elapsedText").textContent = fmtDur(st.elapsed / 1000);
+    const eta = rate > 0 && st.done < st.total ? (st.total - st.done) / rate : 0;
+    document.getElementById("etaText").textContent =
+      st.done >= st.total ? "0:00" : fmtDur(eta);
+    if (st.done >= st.total) {
+      document.getElementById("genBar").classList.add("done");
+    }
+  }
+
+  function startGen() {
+    const meta = calcFrames(fileKB);
+    const msPerFrame = 25; // measured optimized
+    genState = {
+      done: 0,
+      total: meta.frames,
+      elapsed: 0,
+      history: [],
+      last: performance.now(),
+    };
+    document.getElementById("genBar").classList.remove("done");
+    document.getElementById("kMeta").textContent =
+      meta.k + " / " + meta.cycle;
+    const beforeS = (meta.frames * 313) / 1000;
+    const afterS = (meta.frames * 25) / 1000;
+    document.getElementById("speedMeta").textContent =
+      "~" + beforeS.toFixed(0) + "s → ~" + afterS.toFixed(0) + "s";
+
+    clearInterval(genTimer);
+    const tick = () => {
+      const now = performance.now();
+      genState.elapsed += now - genState.last;
+      genState.last = now;
+      // simulate bursty parallel workers
+      const burst = 1 + Math.floor(Math.random() * 3);
+      genState.done = Math.min(genState.total, genState.done + burst);
+      genState.history.push(genState.done / genState.total);
+      if (genState.history.length > 48) genState.history.shift();
+      updateGenUI();
+      renderGenChart(genState.history);
+      if (genState.done >= genState.total) {
+        clearInterval(genTimer);
+        genTimer = null;
+      }
+    };
+    // step faster than real-time so the demo is watchable
+    genTimer = setInterval(tick, Math.max(40, msPerFrame * 0.6));
+    document.getElementById("genBtn").disabled = true;
+    document.getElementById("genBtn").textContent = "生成中…";
+  }
+
+  function resetGen() {
+    clearInterval(genTimer);
+    genTimer = null;
+    genState = { done: 0, total: calcFrames(fileKB).frames, elapsed: 0, history: [], last: performance.now() };
+    document.getElementById("genBar").style.width = "0%";
+    document.getElementById("genBar").classList.remove("done");
+    document.getElementById("genBtn").disabled = false;
+    document.getElementById("genBtn").textContent = "开始生成";
+    updateGenUI();
+    renderGenChart([]);
+    const meta = calcFrames(fileKB);
+    document.getElementById("kMeta").textContent = meta.k + " / " + meta.cycle;
+    document.getElementById("speedMeta").textContent =
+      "~" + ((meta.frames * 313) / 1000).toFixed(0) + "s → ~" + ((meta.frames * 25) / 1000).toFixed(0) + "s";
+  }
+
+  sizeSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    sizeSeg.querySelectorAll("button").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+    fileKB = parseInt(b.dataset.kb, 10);
+    resetGen();
+  });
+  document.getElementById("genBtn").addEventListener("click", startGen);
+  document.getElementById("genReset").addEventListener("click", resetGen);
+  resetGen();
+
+  // ---------- Tab 2: rotation ----------
+  const phone = document.getElementById("phone");
+  const holdSeg = document.getElementById("holdSeg");
+  const fixSeg = document.getElementById("fixSeg");
+  let hold = "portrait";
+  let fixMode = "fixed";
+
+  function syncRot() {
+    phone.classList.toggle("landscape", hold === "landscape");
+    phone.classList.toggle("bug", fixMode === "bug");
+    phone.classList.toggle("fixed", fixMode === "fixed");
+
+    // AOSP: mount=90; portrait activity rot=0 → disp=90; landscape rot=90 → disp=0
+    const disp = hold === "portrait" ? 90 : 0;
+    const pw = 2560, ph = 1440;
+    const view = hold === "portrait" ? [1080, 2400] : [2400, 1080];
+    const dispW = disp === 90 || disp === 270 ? ph : pw;
+    const dispH = disp === 90 || disp === 270 ? pw : ph;
+    const scale = Math.min(view[0] / dispW, view[1] / dispH);
+    document.getElementById("dispW").textContent = dispW;
+    document.getElementById("dispH").textContent = dispH;
+    document.getElementById("scaleTxt").textContent = scale.toFixed(3);
+    document.getElementById("dispOri").textContent = disp + "°";
+    document.getElementById("transposeTxt").textContent =
+      disp === 90 || disp === 270 ? "是（竖持）" : "否（横持）";
+    document.getElementById("matKind").textContent =
+      fixMode === "bug" ? "setScale(s,s)+translate" : "旋转 + letterbox 矩阵";
+
+    const note = document.getElementById("rotNote");
+    if (fixMode === "bug") {
+      note.innerHTML =
+        '<span class="pill warn">旧矩阵</span> ' +
+        "在 TextureView 上用 <code>setScale(s,s)</code> 作用于<strong>已铺满视图</strong>的纹理，" +
+        "预览被缩小到约 s² 倍并偏移 —— 就是「一小格 / 发歪」。引导框仍按竖屏参数画，对不上内容。";
+    } else {
+      note.innerHTML =
+        '<span class="pill">v1.16</span> ' +
+        "<strong>TextureView.setTransform 作用在“已铺满视图”的纹理上</strong>。" +
+        "旧矩阵 <code>setScale(s,s)+translate</code> 会把已经填满的预览再缩小 s 倍并偏移。" +
+        "v1.16 改为 <code>setDisplayOrientation(0)</code> 并用矩阵完整承担「旋转 + letterbox」。";
+    }
+  }
+
+  holdSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    holdSeg.querySelectorAll("button").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+    hold = b.dataset.hold;
+    syncRot();
+  });
+  fixSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    fixSeg.querySelectorAll("button").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+    fixMode = b.dataset.fix;
+    syncRot();
+  });
+  syncRot();
+
+  // ---------- Tab 3: decode speed ----------
+  const decHoldSeg = document.getElementById("decHoldSeg");
+  let decHold = "L";
+
+  function drawLadder() {
+    const el = document.getElementById("ladderChart");
+    const isL = decHold === "L";
+    // simulated rung-hit distribution
+    const now = isL ? [86, 10, 3, 1, 0] : [82, 12, 4, 1.5, 0.5];
+    const old = isL ? [48, 22, 16, 9, 5] : [72, 16, 7, 3, 2];
+    const labels = ["R0", "R1", "R2", "R3", "R4"];
+    const W = 100, H = 100;
+    let bars = "";
+    for (let i = 0; i < 5; i++) {
+      const x = 8 + i * 18;
+      const hn = (now[i] / 100) * 70;
+      const ho = (old[i] / 100) * 70;
+      bars +=
+        '<rect x="' + (x - 1) + '" y="' + (82 - ho) + '" width="6" height="' + ho +
+        '" fill="#F85149" opacity="0.55" rx="1"/>';
+      bars +=
+        '<rect x="' + (x + 5) + '" y="' + (82 - hn) + '" width="6" height="' + hn +
+        '" fill="#4CAF50" rx="1"/>';
+      bars +=
+        '<text x="' + (x + 5) + '" y="92" fill="#8B949E" font-size="5" text-anchor="middle">' +
+        labels[i] + "</text>";
+    }
+    el.innerHTML =
+      '<svg viewBox="0 0 100 100" preserveAspectRatio="none">' +
+      '<rect x="0" y="0" width="100" height="100" fill="#1C2330"/>' + bars + "</svg>";
+
+    // numbers
+    const msNow = isL ? 4.2 : 5.1;
+    const msOld = isL ? 11.8 : 9.6;
+    document.getElementById("msNow").textContent = msNow.toFixed(1);
+    document.getElementById("msOld").textContent = msOld.toFixed(1);
+    document.getElementById("thrText").textContent = isL ? "48" : "36";
+    document.getElementById("r0Text").textContent = isL ? "86%" : "82%";
+    document.getElementById("dropText").textContent = isL ? "4%" : "7%";
+    document.getElementById("pixBonus").textContent = isL
+      ? "~3× 有效 QR 面积"
+      : "~1×（竖持）";
+    document.getElementById("alignTxt").textContent = isL
+      ? "横持 disp=0，grid 不转置"
+      : "竖持 disp=90，grid 转置";
+  }
+
+  decHoldSeg.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    decHoldSeg.querySelectorAll("button").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+    decHold = b.dataset.h;
+    drawLadder();
+  });
+  drawLadder();
+})();
+</script>
+</body>
+</html>

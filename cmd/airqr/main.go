@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
 
@@ -145,6 +146,41 @@ func sendCmd(args []string) {
 	}
 }
 
+// writePasses renders all passes with a single progress bar + ETA and
+// returns the total frame count written.
+func writePasses(r *render.SessionRenderer, passes, maxFrames int, outDir, label string) int {
+	if passes < 1 {
+		passes = 1
+	}
+	// total frame budget (maxFrames caps each pass)
+	perPass := len(r.Sess.PassFrames(0))
+	if maxFrames > 0 && maxFrames < perPass {
+		perPass = maxFrames
+	}
+	total := perPass * passes
+	isTTY := false
+	if fi, err := os.Stderr.Stat(); err == nil {
+		isTTY = (fi.Mode() & os.ModeCharDevice) != 0
+	}
+	prog := render.NewProgress(label, total, isTTY)
+	doneAll := 0
+	base := 0
+	r.OnProgress = func(done, totalPass int) {
+		prog.FrameDone(base + done)
+	}
+	for p := 0; p < passes; p++ {
+		n, err := r.RenderPass(p, maxFrames, outDir)
+		if err != nil {
+			die("pass %d: %v", p, err)
+		}
+		base += n
+		doneAll += n
+	}
+	r.OnProgress = nil
+	prog.Finish()
+	return doneAll
+}
+
 // renderFrames is the shared render pipeline (used by render and send).
 func renderFrames(path, out string, grid, version int, ecc string, width, height, passes int, seed, tid uint64, maxFrames int) {
 	data, err := os.ReadFile(path)
@@ -200,14 +236,9 @@ func renderFrames(path, out string, grid, version int, ecc string, width, height
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		die("%v", err)
 	}
-	total := 0
-	for p := 0; p < passes; p++ {
-		n, err := r.RenderPass(p, maxFrames, out)
-		if err != nil {
-			die("pass %d: %v", p, err)
-		}
-		total += n
-	}
+	t0 := time.Now()
+	total := writePasses(r, passes, maxFrames, out, "render")
+	elapsed := time.Since(t0)
 	info := filepath.Join(out, "session.txt")
 	os.WriteFile(info, []byte(strings.Join([]string{
 		"tid=" + strconv.FormatUint(tid, 10),
@@ -220,8 +251,8 @@ func renderFrames(path, out string, grid, version int, ecc string, width, height
 		"grid=" + strconv.Itoa(grid),
 		"version=" + strconv.Itoa(version),
 	}, "\n")), 0o644)
-	fmt.Printf("rendered %d frames (%d passes, K=%d, cycle=%d, blen=%d, seed=%d, tid=%d) -> %s\n",
-		total, passes, k, sess.Cycle(), blen, seed, tid, out)
+	fmt.Printf("rendered %d frames in %s (%d passes, K=%d, cycle=%d, blen=%d, seed=%d, tid=%d) -> %s\n",
+		total, elapsed.Round(time.Millisecond), passes, k, sess.Cycle(), blen, seed, tid, out)
 }
 
 // testqrCmd writes a single QR that the receiver recognizes as the camera
@@ -357,14 +388,9 @@ func renderCmd(args []string) {
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		die("%v", err)
 	}
-	total := 0
-	for p := 0; p < *passes; p++ {
-		n, err := r.RenderPass(p, *maxFrames, *out)
-		if err != nil {
-			die("pass %d: %v", p, err)
-		}
-		total += n
-	}
+	t0 := time.Now()
+	total := writePasses(r, *passes, *maxFrames, *out, "render")
+	elapsed := time.Since(t0)
 	info := filepath.Join(*out, "session.txt")
 	os.WriteFile(info, []byte(strings.Join([]string{
 		"tid=" + strconv.FormatUint(*tid, 10),
@@ -377,6 +403,6 @@ func renderCmd(args []string) {
 		"grid=" + strconv.Itoa(*grid),
 		"version=" + strconv.Itoa(*version),
 	}, "\n")), 0o644)
-	fmt.Printf("rendered %d frames (%d passes, K=%d, cycle=%d, blen=%d, seed=%d, tid=%d) -> %s\n",
-		total, *passes, k, sess.Cycle(), blen, *seed, *tid, *out)
+	fmt.Printf("rendered %d frames in %s (%d passes, K=%d, cycle=%d, blen=%d, seed=%d, tid=%d) -> %s\n",
+		total, elapsed.Round(time.Millisecond), *passes, k, sess.Cycle(), blen, *seed, *tid, *out)
 }

@@ -38,6 +38,11 @@ public final class CameraController {
     private float lbScale = 0, lbTx = 0, lbTy = 0;
     private int lbImgW = 0, lbImgH = 0, lbViewW = 0, lbViewH = 0;
 
+    /**
+     * Logical display orientation (0/90/180/270 CW) used for the preview
+     * matrix, focus mapping, and the framing guide. The camera HAL itself is
+     * always started at 0 — this value drives our TextureView transform.
+     */
     public void setDisplayOrientation(int degrees) {
         if (degrees == 0 || degrees == 90 || degrees == 180 || degrees == 270) {
             displayOrientation = degrees;
@@ -99,7 +104,10 @@ public final class CameraController {
         } catch (Exception e) {
             throw new RuntimeException("setPreviewTexture", e);
         }
-        camera.setDisplayOrientation(displayOrientation); // portrait default 90
+        // Visual upright + letterbox are done entirely in the TextureView
+        // matrix (see applyLetterbox). OEM setDisplayOrientation is left at 0
+        // so we never fight HAL/MIUI transforms — that fight is the "歪" bug.
+        camera.setDisplayOrientation(0);
         int bufSize = w * h * 3 / 2;
         for (int i = 0; i < 3; i++) {
             camera.addCallbackBuffer(new byte[bufSize]);
@@ -136,27 +144,64 @@ public final class CameraController {
     }
 
     /**
-     * Letterbox: the preview stream arrives rotated by setDisplayOrientation —
-     * displayed size = ph × pw for 90/270, pw × ph for 0/180. Scale uniformly
-     * to fit the view, centered: no stretch. Stores params for tap-to-focus
-     * mapping and forwards the content rect to the framing guide.
+     * Letterbox + hold-rotation via TextureView matrix.
+     *
+     * CRITICAL (v1.16 field bug "横屏旋转后会歪/一小格"): TextureView.setTransform
+     * is applied AFTER the surface texture is stretched to the view. The old
+     * matrix {@code setScale(s,s); postTranslate(tx,ty)} therefore shrank the
+     * already-view-sized image by s and offset it — preview appeared as a
+     * small skewed patch. Camera.setDisplayOrientation is also OEM-dependent
+     * (HyperOS/MIUI), so we set it to 0 and own the full visual transform:
+     * buffer is unrotated and stretched to the view; this matrix maps that
+     * stretch onto the upright, letterboxed card. Focus/guide keep the same
+     * (scale, tx, ty, dispW, dispH) model as before.
      */
     private void applyLetterbox() {
         final int pw = previewW, ph = previewH;
         final int disp = displayOrientation;
         textureView.post(() -> {
             int vw = textureView.getWidth(), vh = textureView.getHeight();
-            if (vw == 0 || vh == 0) return;
+            if (vw == 0 || vh == 0 || pw == 0 || ph == 0) return;
             float dispW = (disp == 0 || disp == 180) ? pw : ph;
             float dispH = (disp == 0 || disp == 180) ? ph : pw;
-            float scale = Math.min(vw / dispW, vh / dispH);
+            float scale = Math.min(vw / (float) dispW, vh / (float) dispH);
             float tx = (vw - dispW * scale) / 2f, ty = (vh - dispH * scale) / 2f;
             android.util.Log.i(TAG, "letterbox view=" + vw + "x" + vh
                     + " content=" + dispW + "x" + dispH + " scale=" + scale
                     + " disp=" + disp);
+            // Stretched point (sx,sy) shows buffer (sx*pw/vw, sy*ph/vh).
+            // After CW rotation by disp + letterbox scale s + offset (tx,ty):
+            float sx = scale * pw / vw, sy = scale * ph / vh;
             Matrix m = new Matrix();
-            m.setScale(scale, scale);
-            m.postTranslate(tx, ty);
+            switch (disp) {
+                case 90:
+                    // (bx,by) -> (ph-by, bx)
+                    m.setValues(new float[]{
+                            0, -sy, scale * ph + tx,
+                            sx, 0, ty,
+                            0, 0, 1});
+                    break;
+                case 180:
+                    // (bx,by) -> (pw-bx, ph-by)
+                    m.setValues(new float[]{
+                            -sx, 0, scale * pw + tx,
+                            0, -sy, scale * ph + ty,
+                            0, 0, 1});
+                    break;
+                case 270:
+                    // (bx,by) -> (by, pw-bx)
+                    m.setValues(new float[]{
+                            0, sy, tx,
+                            -sx, 0, scale * pw + ty,
+                            0, 0, 1});
+                    break;
+                default: // 0
+                    m.setValues(new float[]{
+                            sx, 0, tx,
+                            0, sy, ty,
+                            0, 0, 1});
+                    break;
+            }
             textureView.setTransform(m);
             lbScale = scale;
             lbTx = tx;

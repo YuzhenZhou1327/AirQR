@@ -32,7 +32,8 @@
 
 | 版本 | commit | 要点 | 真机状态 |
 |---|---|---|---|
-| **v1.15** | `40938da` | 持握方向改由 Activity 显示旋转（fullSensor）直驱；删除 OrientationEventListener 信念路径；RotationSim 6/6 / RotBench 锁定旋转数学 | **未装机 ← 交接点** |
+| **v1.16** | (工作区) | **横屏旋转矩阵修复**（TextureView setTransform 作用在已铺满纹理上，旧 setScale+translate 导致「一小格/歪」；改为 setDisplayOrientation(0)+矩阵承担旋转+letterbox）+ **解码并行 cell/早退** + **Linux 渲染 10x 加速**（draw.Draw + 并行帧 + BestSpeed PNG）+ 进度条/ETA | **待装机** |
+| v1.15 | `40938da` | 持握方向改由 Activity 显示旋转（fullSensor）直驱；删除 OrientationEventListener 信念路径；RotationSim 6/6 / RotBench 锁定旋转数学 | 用户反馈横屏仍歪/慢 → 触发 v1.16 |
 | v1.14 | `fa0c66e` | Activity 改 fullSensor 随持握跟转 + configChanges 保活防重建 + stop() 清 transform | 未装机 |
 | v1.13 | `b2eba06` | 持握方向第一版（传感器监听 + grid 转置 + 四档对焦 + 引导框贴合内容区）| 用户实测仍有问题 → 触发 v1.14/15 |
 | v1.12 | `29a95f5` | 解码梯 R0–R4（半采样 cell / 全帧 global/hybrid / TRY_HARDER）+ 清晰度门控 + auto-torch + manifest `grid` 字段 | 未装机 |
@@ -40,7 +41,7 @@
 | v1.9 | `99f9a6a` | `getText()` 取数修复（rawBytes 含 mode 头导致全丢）+ 构建 fail-fast + 桌面 harness 建立 | ✓ 装机自检通过 |
 | v1.0–v1.7 | `git log` | 启动闪退 / ISO-8859-1 / surface 竞态 / 自检 ANR 等，见 README 与 git log | — |
 
-**注意**：v1.0–v1.14 的 APK 均有已知缺陷，勿装机；交付目录只保留 v1.15。
+**注意**：v1.0–v1.15 的 APK 均有已知缺陷，勿装机；交付目录只保留 v1.16。
 
 ### 3.2 已验证（可复跑的证据）
 
@@ -57,10 +58,17 @@
 
 ### 3.4 用户当前诉求（背景）
 
-用户要求"**横持手机时二维码占满画幅**"（横持 16:9 满幅 vs 竖持约 31% 屏宽，约 3 倍像素红利）。
+用户要求「**横持手机时二维码占满画幅**」（横持 16:9 满幅 vs 竖持约 31% 屏宽，约 3 倍像素红利）。
 用户横持实测反馈（截图）：「画面只有一小格，有扭曲，且绿色引导框还是竖屏的模式」；随后要求「旋转逻辑还是有问题——你先自己模拟一下再交付」。
-v1.14/v1.15 为对应修复；**v1.15 待装机验证（截至交接未收到回执），是本次交接的悬起点**。
-若回执仍异常：抓屏上诊断行（含 P/L 持握标记）+ `adb logcat -s AirQR`（关注 `display orientation ->` 行），对照 §7 缩小到 framework/HAL 层。
+v1.14/v1.15 为对应修复后，用户仍反馈：「**横屏画面旋转后会歪，且横屏解码速度没有竖屏快**」+「**500KB 以上文件生成二维码很慢，最好加进度条和预估时间**」。
+
+**v1.16 对应修复（桌面已验证，待真机）**：
+1. **Linux 渲染 10x**：`internal/render` 用 `draw.Draw` 批量像素 + 帧级 worker 池 + PNG BestSpeed；CLI 进度条/ETA（stderr 单行刷新）。实测 4K 30 帧 9.4s → 0.87s。
+2. **横屏「歪」根因**：`TextureView.setTransform` 作用在**已铺满视图**的纹理上；旧 `setScale(s,s)+postTranslate(tx,ty)` 把已满幅预览再缩小 s 倍并偏移 → 「一小格/歪」。v1.16 改 `setDisplayOrientation(0)` + 矩阵完整承担「旋转 + letterbox」（RotationSim T6 锁定角点映射）。
+3. **横屏解码速度**：cell 解码 3 线程并行 + budget 早退；对齐修复后 cell 不再切码，rung 稳定停在 R0/R1。
+
+桌面证据：Go test 全绿、RotationSim 7/7、GoldenVectors 5/5、APK `android/build/airqr-v1.16.apk` BUILD OK。
+交互演示：仓库根目录 `index.html`（进度条 / 横屏矩阵前后对比 / 解码梯）。
 
 ## 4. 环境与工具链（本机精确路径）
 
@@ -173,9 +181,9 @@ ADB="D:/tools/platform-tools/platform-tools/adb.exe"
 
 ## 9. 接手第一件事（按序执行）
 
-1. **离线全绿**（不碰手机）：`go test ./...`、JUnit golden、RotationSim、RotBench、roundtrip.py。
-2. **装机 v1.15**（`airqr-delivery/airqr-v1.15.apk`），跑 E2E 第 9/10 项（横/竖持对比）+ 回归一例小文件 e2e（可参考 `demo2.txt` 2136B）。
-3. **处理回执**：若横持仍有异常，按 §3.4 收集证据后定位；旋转数学层已被 RotationSim 锁定，优先怀疑 framework/HAL 层。
+1. **离线全绿**（不碰手机）：`go test ./...`、JUnit golden、RotationSim（现为 7/7 含 T6 矩阵）、RotBench、roundtrip.py。
+2. **装机 v1.16**（`android/build/airqr-v1.16.apk`），跑 E2E 第 9/10 项（横/竖持对比）+ 回归一例小文件 e2e（可参考 `demo2.txt` 2136B）。重点看横屏：预览是否正、引导框是否贴合、横持吞吐 ≥ 竖持。
+3. **处理回执**：若横持仍有异常，抓 `adb logcat -s AirQR`（`letterbox view=` / `display orientation ->` 行）对照矩阵参数；关注 MIUI 是否仍对 TextureView 叠加 HAL 变换。
 4. **继续 backlog**：P2 项——zstd 预压缩 / 加密 / 自举安装 / 双机模式。
 5. **保持纪律**：一次一因、出包升版本、SHA256SUMS 同步、真机验证后才算完成。
 
