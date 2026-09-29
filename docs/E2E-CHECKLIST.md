@@ -5,7 +5,7 @@
 ## 准备（联网机）
 
 1. `dist/airqr-linux-amd64`（或 Windows 上直接 `airqr.exe render` + 播放器）→ 拷到测试机。
-2. `dist/airqr-v1.0.apk` → 侧载到安卓手机（Android 10+）。
+2. `dist/airqr-v1.15.apk` → 侧载到安卓手机（Android 10+）。
 3. 测试样本：`python -c "import os;open('t100k.bin','wb').write(os.urandom(102400))"`，
    同法做 1MB / 10MB 样本。记录各自 sha256。
 
