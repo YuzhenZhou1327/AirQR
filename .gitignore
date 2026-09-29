@@ -1,5 +1,6 @@
 dist/
 *.apk
+!release/*.apk
 frames/
 __pycache__/
 *.pyc
